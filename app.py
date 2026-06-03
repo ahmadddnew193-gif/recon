@@ -1,101 +1,118 @@
 import streamlit as st
 import requests
 import time
+from collections import deque
 
-st.set_page_config(page_title="BloxConnect Tracer", layout="centered")
+st.set_page_config(page_title="Deep Connect Tracer", layout="centered")
 
-st.title("🔗 Social Graph Path Finder")
-st.write("Trace the exact chain of mutual connections linking any two players together.")
+st.title("🔗 Unlimited Social Graph Pathfinder")
+st.write("A true Breadth-First Search (BFS) network engine using politeness delays.")
 
-# 1. Helper Function: Fetch Friend IDs
+# --- API Helper Functions ---
 def fetch_friend_ids(user_id):
-    """Fetches up to the first 200 friend IDs for a given user."""
+    """Fetches all friend IDs for a given target user."""
     url = f"https://friends.roblox.com/v1/users/{user_id}/friends"
     try:
         response = requests.get(url)
         if response.status_code == 200:
-            friends_data = response.json().get("data", [])
-            # Filter out deleted accounts, return a clean list of IDs
-            return [friend["id"] for friend in friends_data if not friend.get("isDeleted", False)]
+            data = response.json().get("data", [])
+            return [f["id"] for f in data if not f.get("isDeleted", False)]
+        elif response.status_code == 429:
+            st.error("🚨 Rate limit hit! Increase the delay slider.")
+            return []
         return []
     except Exception:
         return []
 
-# 2. Helper Function: Convert IDs to Real Usernames efficiently
 def resolve_usernames(id_list):
-    """Takes a list of IDs and resolves usernames in a single batch POST request."""
+    """Resolves an ordered chain of user IDs into real names in one batch."""
     if not id_list:
         return {}
     url = "https://users.roblox.com/v1/users"
-    payload = {"userIds": id_list, "excludeBannedUsers": False}
     try:
-        response = requests.post(url, json=payload)
+        response = requests.post(url, json={"userIds": id_list, "excludeBannedUsers": False})
         if response.status_code == 200:
-            user_data = response.json().get("data", [])
-            return {user["id"]: user["name"] for user in user_data}
+            return {u["id"]: u["name"] for u in response.json().get("data", [])}
         return {}
     except Exception:
         return {}
 
-# --- UI Layout Elements ---
+# --- User Interface Components ---
 col1, col2 = st.columns(2)
-start_id = col1.text_input("Starting User ID (You):", value="")
-target_id = col2.text_input("Target User ID (e.g., 156 for Builderman):", value="")
+start_input = col1.text_input("Starting User ID (You):", "")
+target_input = col2.text_input("Target User ID:", "")
 
-if st.button("🗺️ Trace Connection Path", use_container_width=True):
-    if start_id.isdigit() and target_id.isdigit():
-        s_id = int(start_id)
-        t_id = int(target_id)
+# Performance & Politeness Controls
+st.sidebar.header("⚙️ Engine Calibration")
+delay = st.sidebar.slider("API Request Delay (Seconds)", 0.1, 2.0, 0.4, step=0.1)
+max_depth = st.sidebar.slider("Max Degrees of Separation (Layers)", 1, 3, 2)
+
+if st.button("🚀 Begin Graph Traversal", use_container_width=True):
+    if start_input.isdigit() and target_input.isdigit():
+        start_id = int(start_input)
+        target_id = int(target_input)
         
-        if s_id == t_id:
-            st.warning("The starting player and the target player are the same user!")
+        if start_id == target_id:
+            st.warning("Starting point matches the destination target.")
         else:
-            with st.spinner("Analyzing public friendship graphs..."):
+            # --- BFS Engine Initialization ---
+            # The queue stores tuples of: (Current_Node_ID, Path_Taken_To_Get_Here)
+            queue = deque([(start_id, [start_id])])
+            visited = set([start_id])
+            
+            path_found = False
+            final_chain = []
+            
+            # Diagnostic Counters for the UI
+            total_requests = 0
+            status_container = st.empty()
+            
+            start_time = time.time()
+            
+            while queue:
+                current_node, path = queue.popleft()
                 
-                # Step 1: Scan Tier 1 (Direct Friends)
-                st.write("🔍 Scanning your direct friend list...")
-                tier_1_friends = fetch_friend_ids(s_id)
+                # Enforce the depth circuit-breaker safely
+                if len(path) > max_depth:
+                    continue
                 
-                path_found = False
-                final_chain = []
+                total_requests += 1
+                status_container.text(f"⏳ Processing API Request #{total_requests} (Scanning node: {current_node})...")
                 
-                if t_id in tier_1_friends:
-                    # Direct Match Found immediately
-                    final_chain = [s_id, t_id]
+                # 1. Fetch current node's friends
+                friends = fetch_friend_ids(current_node)
+                time.sleep(delay) # The Politeness Delay
+                
+                # 2. Destination Validation (Short-circuit match check)
+                if target_id in friends:
+                    final_chain = path + [target_id]
                     path_found = True
-                else:
-                    # Step 2: Scan Tier 2 (Friends of Friends)
-                    st.write("🔄 Target not found in direct friends. Scanning mutual connections...")
-                    
-                    # To prevent hitting rate limits, we limit scanning to the top 30 friends
-                    scan_limit = tier_1_friends[:30]
-                    
-                    for index, mutual_id in enumerate(scan_limit):
-                        # Add a tiny internal delay to stay safe from API rate limits
-                        time.sleep(0.1)
-                        
-                        sub_friends = fetch_friend_ids(mutual_id)
-                        if t_id in sub_friends:
-                            final_chain = [s_id, mutual_id, t_id]
-                            path_found = True
-                            break
+                    break
                 
-                # Render results to the website interface
-                if path_found:
-                    st.success("🎉 Connection Path Discovered!")
-                    
-                    # Resolve IDs to readable names for the web display
-                    name_map = resolve_usernames(final_chain)
-                    
-                    # Format output visuals
-                    display_chain = [name_map.get(uid, f"User {uid}") for uid in final_chain]
-                    
-                    st.subheader("🎯 Path Blueprint:")
-                    # Display the steps cleanly across the screen
-                    st.info(" ➔ ".join(f"**{name}**" for name in display_chain))
-                    st.metric(label="Degrees of Separation", value=f"{len(final_chain) - 1} Step(s) Away")
-                else:
-                    st.error("No close connection found within a 2-degree limit, or the target's friend settings are private.")
-                    st.caption("Note: To avoid security rate-limiting on web requests, this scanner checks up to 30 mutual nodes.")
+                # 3. Graph Expansion
+                for friend_id in friends:
+                    if friend_id not in visited:
+                        visited.add(friend_id)
+                        # Append the friend node along with the updated tracking path history
+                        queue.append((friend_id, path + [friend_id]))
+            
+            # --- Rendering Results ---
+            elapsed_time = time.time() - start_time
+            status_container.empty()
+            
+            st.sidebar.metric("Execution Time", f"{elapsed_time:.1f}s")
+            st.sidebar.metric("API Calls Dispatched", total_requests)
+            
+            if path_found:
+                st.success(f"🎉 Connection Path Found in {total_requests} steps!")
+                with st.spinner("Resolving usernames for final graph visualization..."):
+                    names = resolve_usernames(final_chain)
+                
+                display_path = [names.get(uid, f"User {uid}") for uid in final_chain]
+                st.info(" ➔ ".join(f"**{name}**" for name in display_path))
+                st.metric("Degrees of Separation", f"{len(final_chain) - 1} Step(s)")
+            else:
+                st.error(f"No connection path found within {max_depth} degrees of separation.")
+                st.info("💡 Try increasing the 'Max Degrees' setting in the sidebar if you are searching a wider network.")
     else:
-        st.error("Please ensure both inputs are numeric Roblox User IDs.")
+        st.error("Please provide valid numeric User IDs.")
