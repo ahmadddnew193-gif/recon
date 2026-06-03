@@ -3,29 +3,39 @@ import requests
 import time
 from collections import deque
 
-st.set_page_config(page_title="Deep Connect Tracer", layout="centered")
+st.set_page_config(page_title="Unstoppable Pathfinder", layout="centered")
 
-st.title("🔗 Unlimited Social Graph Pathfinder")
-st.write("A true Breadth-First Search (BFS) network engine using politeness delays.")
+st.title("🛡️ Persistent Graph Pathfinder")
+st.write("This engine saves its state. If rate-limited, you can pause and resume without losing progress.")
 
-# --- API Helper Functions ---
-def fetch_friend_ids(user_id):
-    """Fetches all friend IDs for a given target user."""
+# --- Initialize Session States ---
+# This keeps data alive even when the page re-renders or hits an error
+if "bfs_queue" not in st.session_state:
+    st.session_state.bfs_queue = None
+if "visited" not in st.session_state:
+    st.session_state.visited = set()
+if "total_requests" not in st.session_state:
+    st.session_state.total_requests = 0
+if "path_found" not in st.session_state:
+    st.session_state.path_found = False
+if "final_chain" not in st.session_state:
+    st.session_state.final_chain = []
+
+# --- API Fetch with Error Handling ---
+def fetch_friends_persistent(user_id):
     url = f"https://friends.roblox.com/v1/users/{user_id}/friends"
     try:
         response = requests.get(url)
         if response.status_code == 200:
             data = response.json().get("data", [])
-            return [f["id"] for f in data if not f.get("isDeleted", False)]
+            return [f["id"] for f in data if not f.get("isDeleted", False)], False
         elif response.status_code == 429:
-            st.error("🚨 Rate limit hit! Increase the delay slider.")
-            return []
-        return []
+            return [], True  # Trigger Rate Limit Flag
+        return [], False
     except Exception:
-        return []
+        return [], False
 
 def resolve_usernames(id_list):
-    """Resolves an ordered chain of user IDs into real names in one batch."""
     if not id_list:
         return {}
     url = "https://users.roblox.com/v1/users"
@@ -37,82 +47,111 @@ def resolve_usernames(id_list):
     except Exception:
         return {}
 
-# --- User Interface Components ---
+# --- User UI Controls ---
 col1, col2 = st.columns(2)
-start_input = col1.text_input("Starting User ID (You):", "")
-target_input = col2.text_input("Target User ID:", "")
+start_input = col1.text_input("Starting User ID:", "", disabled=st.session_state.bfs_queue is not None)
+target_input = col2.text_input("Target User ID:", "", disabled=st.session_state.bfs_queue is not None)
 
-# Performance & Politeness Controls
-st.sidebar.header("⚙️ Engine Calibration")
-delay = st.sidebar.slider("API Request Delay (Seconds)", 0.1, 2.0, 0.4, step=0.1)
-max_depth = st.sidebar.slider("Max Degrees of Separation (Layers)", 1, 3, 2)
+delay = st.slider("Delay between API requests (seconds):", 0.5, 3.0, 1.5, step=0.1)
+max_depth = st.slider("Max Layers to Search:", 1, 4, 3)
 
-if st.button("🚀 Begin Graph Traversal", use_container_width=True):
-    if start_input.isdigit() and target_input.isdigit():
-        start_id = int(start_input)
-        target_id = int(target_input)
+# --- Button logic ---
+button_placeholder = st.empty()
+
+# If we haven't started a search yet, show "Start"
+if st.session_state.bfs_queue is None:
+    if button_placeholder.button("🚀 Start Deep Traversal", use_container_width=True):
+        if start_input.isdigit() and target_input.isdigit():
+            s_id = int(start_input)
+            t_id = int(target_input)
+            
+            # Setup the engine state
+            st.session_state.bfs_queue = deque([(s_id, [s_id])])
+            st.session_state.visited = {s_id}
+            st.session_state.total_requests = 0
+            st.session_state.path_found = False
+            st.session_state.target_id = t_id
+            st.rerun()
+else:
+    # If a search is currently paused or active, show "Resume"
+    if button_placeholder.button("🔄 Resume Search Pipeline", use_container_width=True):
+        st.session_state.rate_limited = False # Clear the flag to try again
+        st.rerun()
+
+# --- Core Processing Engine Loop ---
+if st.session_state.bfs_queue and not st.session_state.path_found:
+    status_box = st.empty()
+    progress_bar = st.progress(0)
+    
+    rate_limit_tripped = False
+    
+    # Process up to 20 nodes per button click to prevent web timeouts
+    nodes_to_process_this_turn = 20 
+    
+    while st.session_state.bfs_queue and nodes_to_process_this_turn > 0:
+        current_node, path = st.session_state.bfs_queue.popleft()
         
-        if start_id == target_id:
-            st.warning("Starting point matches the destination target.")
-        else:
-            # --- BFS Engine Initialization ---
-            # The queue stores tuples of: (Current_Node_ID, Path_Taken_To_Get_Here)
-            queue = deque([(start_id, [start_id])])
-            visited = set([start_id])
+        # Stop if we exceed maximum depth limits
+        if len(path) > max_depth:
+            continue
             
-            path_found = False
-            final_chain = []
+        st.session_state.total_requests += 1
+        nodes_to_process_this_turn -= 1
+        
+        status_box.text(f"Scanning node: {current_node} | Total API calls: {st.session_state.total_requests}")
+        
+        # Run API Fetch
+        friends, hit_429 = fetch_friends_persistent(current_node)
+        time.sleep(delay)
+        
+        if hit_429:
+            # Re-queue the current node so we don't lose it!
+            st.session_state.bfs_queue.appendleft((current_node, path))
+            rate_limit_tripped = True
+            break
             
-            # Diagnostic Counters for the UI
-            total_requests = 0
-            status_container = st.empty()
+        # Target Match Checking
+        if st.session_state.target_id in friends:
+            st.session_state.final_chain = path + [st.session_state.target_id]
+            st.session_state.path_found = True
+            break
             
-            start_time = time.time()
+        # Queue expansion
+        for friend_id in friends:
+            if friend_id not in st.session_state.visited:
+                st.session_state.visited.add(friend_id)
+                st.session_state.bfs_queue.append((friend_id, path + [friend_id]))
+
+    # Loop evaluation
+    if st.session_state.path_found:
+        st.success(f"🎉 Connection Located successfully after {st.session_state.total_requests} lookups!")
+        with st.spinner("Resolving user profiles..."):
+            names = resolve_usernames(st.session_state.st.session_state.final_chain if "final_chain" in st.session_state else st.session_state.final_chain)
+            # Fallback mapping context
+            names = resolve_usernames(st.session_state.final_chain)
+        display_path = [names.get(uid, f"User {uid}") for uid in st.session_state.final_chain]
+        st.info(" ➔ ".join(f"**{name}**" for name in display_path))
+        
+        # Reset button to allow clear operations
+        if st.button("Clear Engine Cache"):
+            st.session_state.bfs_queue = None
+            st.rerun()
             
-            while queue:
-                current_node, path = queue.popleft()
-                
-                # Enforce the depth circuit-breaker safely
-                if len(path) > max_depth:
-                    continue
-                
-                total_requests += 1
-                status_container.text(f"⏳ Processing API Request #{total_requests} (Scanning node: {current_node})...")
-                
-                # 1. Fetch current node's friends
-                friends = fetch_friend_ids(current_node)
-                time.sleep(delay) # The Politeness Delay
-                
-                # 2. Destination Validation (Short-circuit match check)
-                if target_id in friends:
-                    final_chain = path + [target_id]
-                    path_found = True
-                    break
-                
-                # 3. Graph Expansion
-                for friend_id in friends:
-                    if friend_id not in visited:
-                        visited.add(friend_id)
-                        # Append the friend node along with the updated tracking path history
-                        queue.append((friend_id, path + [friend_id]))
-            
-            # --- Rendering Results ---
-            elapsed_time = time.time() - start_time
-            status_container.empty()
-            
-            st.sidebar.metric("Execution Time", f"{elapsed_time:.1f}s")
-            st.sidebar.metric("API Calls Dispatched", total_requests)
-            
-            if path_found:
-                st.success(f"🎉 Connection Path Found in {total_requests} steps!")
-                with st.spinner("Resolving usernames for final graph visualization..."):
-                    names = resolve_usernames(final_chain)
-                
-                display_path = [names.get(uid, f"User {uid}") for uid in final_chain]
-                st.info(" ➔ ".join(f"**{name}**" for name in display_path))
-                st.metric("Degrees of Separation", f"{len(final_chain) - 1} Step(s)")
-            else:
-                st.error(f"No connection path found within {max_depth} degrees of separation.")
-                st.info("💡 Try increasing the 'Max Degrees' setting in the sidebar if you are searching a wider network.")
+    elif rate_limit_tripped:
+        st.error("🚨 Roblox API Rate Limit Hit (HTTP 429)!")
+        st.warning("Your current progress has been saved securely in the dashboard state. Please wait 60 seconds for the API limits to clear, then click 'Resume Search Pipeline' above.")
+        
+    elif not st.session_state.bfs_queue:
+        st.error(f"Search concluded. No active connections found within {max_depth} layers.")
+        if st.button("Reset Engine"):
+            st.session_state.bfs_queue = None
+            st.rerun()
     else:
-        st.error("Please provide valid numeric User IDs.")
+        # If we finished our 20-node batch safely but haven't hit a wall or target, auto-refresh to keep going
+        st.rerun()
+
+# --- Sidebar Realtime Monitor ---
+st.sidebar.header("📊 Live Engine Telemetry")
+st.sidebar.metric("Total API Calls Run", st.session_state.total_requests)
+st.sidebar.metric("Nodes Awaiting Scan", len(st.session_state.bfs_queue) if st.session_state.bfs_queue else 0)
+st.sidebar.metric("Unique Profiles Mapped", len(st.session_state.visited))
