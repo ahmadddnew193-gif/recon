@@ -6,7 +6,7 @@ from collections import deque
 st.set_page_config(page_title="Recon Engine: Fast Path", layout="wide")
 
 st.title("⚡ OSINT Graph Reconnaissance")
-st.write("Live bidirectional API traversal. Note: Reaching celebrity accounts live depends entirely on Roblox rate limits.")
+st.write("Live bidirectional API traversal. Handles hidden or private profiles automatically.")
 
 # --- Session State ---
 if "logs" not in st.session_state:
@@ -81,7 +81,6 @@ if start_btn and s_input.isdigit() and t_input.isdigit():
 
     def log(msg):
         st.session_state.logs.append(msg)
-        # Keep console from getting too massive and lagging
         if len(st.session_state.logs) > 50:
             st.session_state.logs.pop(0)
         console_placeholder.code("\n".join(st.session_state.logs), language="bash")
@@ -90,12 +89,9 @@ if start_btn and s_input.isdigit() and t_input.isdigit():
 
     # Core Execution Loop
     while st.session_state.running:
-        # Determine which side to push forward (always push the smaller queue to save API calls)
-        if not start_queue and not target_queue:
-            log("[ERROR] Queues exhausted. No path exists.")
-            break
-            
-        if len(start_queue) <= len(target_queue) and start_queue:
+        # FIX: Robust directional scheduling logic. 
+        # Prevents engine from quitting if target queue drops to zero due to privacy settings.
+        if start_queue and (not target_queue or len(start_queue) <= len(target_queue)):
             current_node = start_queue.popleft()
             current_path = start_visited[current_node]
             direction = "FORWARD"
@@ -104,9 +100,10 @@ if start_btn and s_input.isdigit() and t_input.isdigit():
             current_path = target_visited[current_node]
             direction = "REVERSE"
         else:
+            log("[ERROR] Search space exhausted. No structural path exists between targets.")
             break
 
-        # Max depth circuit breaker (prevents endless wandering)
+        # Max layer safety limiter
         if len(current_path) > 4:
             continue
 
@@ -117,8 +114,7 @@ if start_btn and s_input.isdigit() and t_input.isdigit():
         friends, hit_limit = fetch_friends(current_node)
 
         if hit_limit:
-            log(f"[WARNING] HTTP 429 Rate Limit Hit. Halting thread for 60s...")
-            # Requeue the node so we don't skip it
+            log(f"[WARNING] HTTP 429 Rate Limit Hit. Halting pipeline for 60s...")
             if direction == "FORWARD":
                 start_queue.appendleft(current_node)
             else:
@@ -127,13 +123,12 @@ if start_btn and s_input.isdigit() and t_input.isdigit():
             for i in range(60, 0, -1):
                 status_placeholder.warning(f"Rate limit cooldown: {i} seconds remaining...")
                 time.sleep(1)
-            continue # Resume loop
+            continue 
 
-        # Evaluate connections
+        # Evaluate intersections cleanly
         for friend in friends:
             if direction == "FORWARD":
                 if friend in target_visited:
-                    # Intersection found! Stitch paths carefully.
                     t_path = target_visited[friend]
                     final_chain = current_path + t_path[::-1]
                     path_found = True
@@ -143,7 +138,6 @@ if start_btn and s_input.isdigit() and t_input.isdigit():
                     start_queue.append(friend)
             else:
                 if friend in start_visited:
-                    # Intersection found! Stitch paths carefully.
                     s_path = start_visited[friend]
                     final_chain = s_path + current_path[::-1]
                     path_found = True
@@ -157,19 +151,18 @@ if start_btn and s_input.isdigit() and t_input.isdigit():
 
         time.sleep(delay)
 
-    # Resolution
+    # Resolution Splicing
     if path_found:
-        # Clean duplicates from the intersection
         clean_chain = []
         for u in final_chain:
             if not clean_chain or clean_chain[-1] != u:
                 clean_chain.append(u)
                 
-        log(f"[SUCCESS] Target acquired in {api_calls} queries. Resolving handles...")
+        log(f"[SUCCESS] Target link acquired in {api_calls} queries. Resolving user data handles...")
         names = resolve_usernames(clean_chain)
         
         display = [names.get(uid, f"UID:{uid}") for uid in clean_chain]
         
-        st.success("### 🎯 Verified Graph Sequence")
+        st.success("### 🎯 Verified Graph Sequence Map")
         st.info(" ➔ ".join(f"**{n}**" for n in display))
         st.session_state.running = False
