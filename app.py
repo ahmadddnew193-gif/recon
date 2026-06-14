@@ -3,16 +3,22 @@ import requests
 import time
 from collections import deque
 
-st.set_page_config(page_title="Auto-Resuming Pathfinder", layout="centered")
+st.set_page_config(page_title="Lightning Pathfinder", layout="centered")
 
-st.title("🛡️ Autonomous Graph Pathfinder")
-st.write("This engine automatically handles rate limits. If blocked, it waits 60s and resumes on its own.")
+st.title("⚡ Rapid Meet-in-the-Middle Pathfinder")
+st.write("Uses a Bidirectional Search algorithm to locate paths to famous users in under 5 minutes.")
 
-# --- Initialize Session States ---
-if "bfs_queue" not in st.session_state:
-    st.session_state.bfs_queue = None
-if "visited" not in st.session_state:
-    st.session_state.visited = set()
+# --- Initialize Advanced Session States ---
+if "engine_active" not in st.session_state:
+    st.session_state.engine_active = False
+if "start_queue" not in st.session_state:
+    st.session_state.start_queue = None
+if "target_queue" not in st.session_state:
+    st.session_state.target_queue = None
+if "start_visited" not in st.session_state:
+    st.session_state.start_visited = {}
+if "target_visited" not in st.session_state:
+    st.session_state.target_visited = {}
 if "total_requests" not in st.session_state:
     st.session_state.total_requests = 0
 if "path_found" not in st.session_state:
@@ -20,7 +26,7 @@ if "path_found" not in st.session_state:
 if "final_chain" not in st.session_state:
     st.session_state.final_chain = []
 
-# --- API Fetch with Error Handling ---
+# --- API Layer ---
 def fetch_friends_persistent(user_id):
     url = f"https://friends.roblox.com/v1/users/{user_id}/friends"
     try:
@@ -46,95 +52,170 @@ def resolve_usernames(id_list):
     except Exception:
         return {}
 
-# --- User UI Controls ---
+# --- UI Controls ---
 col1, col2 = st.columns(2)
-start_input = col1.text_input("Starting User ID:", "", disabled=st.session_state.bfs_queue is not None)
-target_input = col2.text_input("Target User ID:", "", disabled=st.session_state.bfs_queue is not None)
+start_input = col1.text_input("Starting User ID (You):", "", disabled=st.session_state.engine_active)
+target_input = col2.text_input("Target User ID (KreekCraft: 140671171):", "", disabled=st.session_state.engine_active)
 
-delay = st.slider("Request Delay (seconds):", 0.5, 3.0, 1.2, step=0.1)
-max_depth = st.slider("Max Search Layers (Degrees of Separation):", 1, 8, 4)
+delay = st.slider("Politeness Delay (seconds):", 0.3, 2.0, 0.7, step=0.1)
+max_total_depth = st.slider("Max Combined Path Length (Layers):", 2, 6, 4)
 
-# --- Button logic ---
-if st.session_state.bfs_queue is None:
-    if st.button("🚀 Start Deep Traversal", use_container_width=True):
+# --- Control Buttons ---
+if not st.session_state.engine_active:
+    if st.button("🚀 Initiate Rapid Traversal", use_container_width=True):
         if start_input.isdigit() and target_input.isdigit():
             s_id = int(start_input)
             t_id = int(target_input)
-            st.session_state.bfs_queue = deque([(s_id, [s_id])])
-            st.session_state.visited = {s_id}
-            st.session_state.total_requests = 0
-            st.session_state.path_found = False
-            st.session_state.target_id = t_id
-            st.rerun()
+            
+            with st.spinner("Initializing dual-ended graph pipelines..."):
+                # Seed Start Side
+                s_friends, s_429 = fetch_friends_persistent(s_id)
+                st.session_state.total_requests += 1
+                
+                if s_429:
+                    st.error("Roblox API rate limited the initialization. Wait a moment and retry.")
+                    st.stop()
+                
+                st.session_state.start_visited = {s_id: [s_id]}
+                st.session_state.start_queue = deque([s_id])
+                for f in s_friends:
+                    st.session_state.start_visited[f] = [s_id, f]
+                    st.session_state.start_queue.append(f)
+                
+                # Seed Target Side (e.g., KreekCraft)
+                t_friends, t_429 = fetch_friends_persistent(t_id)
+                st.session_state.total_requests += 1
+                
+                st.session_state.target_visited = {t_id: [t_id]}
+                st.session_state.target_queue = deque([t_id])
+                
+                # If target has a public friend list, seed all of them to create a massive capture net
+                if t_friends:
+                    for f in t_friends:
+                        st.session_state.target_visited[f] = [t_id, f]
+                        st.session_state.target_queue.append(f)
+                
+                # Check for an immediate intersection (e.g., if you are already mutuals)
+                common = set(st.session_state.start_visited.keys()) & set(st.session_state.target_visited.keys())
+                if common:
+                    intersection_node = common.pop()
+                    st.session_state.final_chain = st.session_state.start_visited[intersection_node] + st.session_state.target_visited[intersection_node][::-1][1:]
+                    st.session_state.path_found = True
+                
+                st.session_state.target_id = t_id
+                st.session_state.start_id = s_id
+                st.session_state.engine_active = True
+                st.rerun()
 else:
-    if st.button("🛑 Stop & Reset Engine", use_container_width=True):
-        st.session_state.bfs_queue = None
+    if st.button("🛑 Force Stop & Clear Engine", use_container_width=True):
+        st.session_state.engine_active = False
+        st.session_state.start_queue = None
+        st.session_state.target_queue = None
         st.rerun()
 
-# --- Core Processing Engine Loop ---
-if st.session_state.bfs_queue and not st.session_state.path_found:
+# --- Core Processing Bidirectional Engine Loop ---
+if st.session_state.engine_active and not st.session_state.path_found:
     status_box = st.empty()
+    direction_flag = "start"
     
-    # Process batch to prevent Streamlit timeout
-    nodes_to_process_this_turn = 15 
+    # Process 15 nodes per layout refresh execution flight
+    nodes_to_process = 15
     
-    while st.session_state.bfs_queue and nodes_to_process_this_turn > 0:
-        current_node, path = st.session_state.bfs_queue.popleft()
+    while (st.session_state.start_queue or st.session_state.target_queue) and nodes_to_process > 0:
+        nodes_to_process -= 1
         
-        if len(path) > max_depth:
+        # Performance optimization: Always expand the smaller queue size to save API calls
+        if len(st.session_state.start_queue) <= len(st.session_state.target_queue) and st.session_state.start_queue:
+            direction_flag = "start"
+            current_node = st.session_state.start_queue.popleft()
+            current_path = st.session_state.start_visited[current_node]
+        elif st.session_state.target_queue:
+            direction_flag = "target"
+            current_node = st.session_state.target_queue.popleft()
+            current_path = st.session_state.target_visited[current_node]
+        else:
+            continue
+            
+        # Circuit breaker for branch lengths
+        if len(current_path) > (max_total_depth // 2) + 1:
             continue
             
         st.session_state.total_requests += 1
-        nodes_to_process_this_turn -= 1
-        
-        status_box.info(f"🔍 Currently Scanning: {current_node} | Total Requests: {st.session_state.total_requests}")
+        status_box.info(f"⚡ Scanning Node: {current_node} | Direction: Outward from {direction_flag.upper()} | API Count: {st.session_state.total_requests}")
         
         friends, hit_429 = fetch_friends_persistent(current_node)
         
         if hit_429:
-            # Put the user back in the front of the queue
-            st.session_state.bfs_queue.appendleft((current_node, path))
-            
+            # Re-queue the active node immediately to preserve state consistency
+            if direction_flag == "start":
+                st.session_state.start_queue.appendleft(current_node)
+            else:
+                st.session_state.target_queue.appendleft(current_node)
+                
             st.error("🚨 Rate Limit Hit (429). Automating Wait Sequence...")
             countdown_bar = st.progress(0)
             for i in range(60, 0, -1):
-                status_box.warning(f"⏳ Cooling down... Resuming in {i} seconds.")
+                status_box.warning(f"⏳ Cooling down... Resuming automated pipeline in {i} seconds.")
                 countdown_bar.progress((60 - i) / 60)
                 time.sleep(1)
-            st.rerun() # Refresh and try the exact same node again
+            st.rerun()
             
-        # Success logic
-        if st.session_state.target_id in friends:
-            st.session_state.final_chain = path + [st.session_state.target_id]
-            st.session_state.path_found = True
+        # Process and check discoveries
+        for friend_id in friends:
+            if direction_flag == "start":
+                if friend_id in st.session_state.target_visited:
+                    # Circle intersection located!
+                    target_branch = st.session_state.target_visited[friend_id]
+                    st.session_state.final_chain = current_path + target_branch[::-1]
+                    st.session_state.path_found = True
+                    break
+                if friend_id not in st.session_state.start_visited:
+                    st.session_state.start_visited[friend_id] = current_path + [friend_id]
+                    st.session_state.start_queue.append(friend_id)
+            else:
+                if friend_id in st.session_state.start_visited:
+                    # Circle intersection located!
+                    start_branch = st.session_state.start_visited[friend_id]
+                    st.session_state.final_chain = start_branch + current_path[::-1]
+                    st.session_state.path_found = True
+                    break
+                if friend_id not in st.session_state.target_visited:
+                    st.session_state.target_visited[friend_id] = current_path + [friend_id]
+                    st.session_state.target_queue.append(friend_id)
+                    
+        if st.session_state.path_found:
             break
             
-        # Expand network
-        for friend_id in friends:
-            if friend_id not in st.session_state.visited:
-                st.session_state.visited.add(friend_id)
-                st.session_state.bfs_queue.append((friend_id, path + [friend_id]))
-        
         time.sleep(delay)
 
-    # Result Handling
+    # Resolve Execution Finish States
     if st.session_state.path_found:
-        st.success(f"🎉 Path Found! Processed {st.session_state.total_requests} nodes.")
-        with st.spinner("Resolving Usernames..."):
-            names = resolve_usernames(st.session_state.final_chain)
+        status_box.empty()
+        st.success(f"🎯 Connection Map Found Rapidly inside {st.session_state.total_requests} API queries!")
         
-        display_path = [names.get(uid, f"User {uid}") for uid in st.session_state.final_chain]
-        st.write("### Connection Chain:")
+        # Clean duplicates from the raw array splice
+        clean_chain = []
+        for uid in st.session_state.final_chain:
+            if uid not in clean_chain:
+                clean_chain.append(uid)
+                
+        with st.spinner("Resolving username handles across network maps..."):
+            names = resolve_usernames(clean_chain)
+            
+        display_path = [names.get(uid, f"User {uid}") for uid in clean_chain]
+        st.write("### 🏁 Verified Connection Chain:")
         st.info(" ➔ ".join(f"**{name}**" for name in display_path))
+        st.metric("Degrees of Separation Matrix", f"{len(clean_chain) - 1} Steps Away")
         
-    elif not st.session_state.bfs_queue:
-        st.error(f"Search Finished. No path found within {max_depth} layers.")
+    elif not st.session_state.start_queue and not st.session_state.target_queue:
+        st.error(f"Search complete. No structural pathways connect these two users within {max_total_depth} layers.")
     else:
-        # Auto-refresh for next batch
+        # Pipeline auto-refresh step iteration
         st.rerun()
 
-# --- Sidebar Monitor ---
+# --- Sidebar Realtime Monitor ---
 st.sidebar.header("📊 Engine Health")
-st.sidebar.metric("API Calls", st.session_state.total_requests)
-st.sidebar.metric("Queue Size", len(st.session_state.bfs_queue) if st.session_state.bfs_queue else 0)
-st.sidebar.metric("Discovered Nodes", len(st.session_state.visited))
+st.sidebar.metric("API Requests Sent", st.session_state.total_requests)
+st.sidebar.metric("Your Front Base Nodes", len(st.session_state.start_queue) if st.session_state.start_queue else 0)
+st.sidebar.metric("Target Capture Base Nodes", len(st.session_state.target_queue) if st.session_state.target_queue else 0)
+st.sidebar.metric("Total Mapped Users", len(st.session_state.start_visited) + len(st.session_state.target_visited))
