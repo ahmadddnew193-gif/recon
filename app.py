@@ -9,7 +9,6 @@ st.title("🛡️ Persistent Graph Pathfinder")
 st.write("This engine saves its state. If rate-limited, you can pause and resume without losing progress.")
 
 # --- Initialize Session States ---
-# This keeps data alive even when the page re-renders or hits an error
 if "bfs_queue" not in st.session_state:
     st.session_state.bfs_queue = None
 if "visited" not in st.session_state:
@@ -53,7 +52,7 @@ start_input = col1.text_input("Starting User ID:", "", disabled=st.session_state
 target_input = col2.text_input("Target User ID:", "", disabled=st.session_state.bfs_queue is not None)
 
 delay = st.slider("Delay between API requests (seconds):", 0.5, 3.0, 1.5, step=0.1)
-max_depth = st.slider("Max Layers to Search:", 1, 4, 3)
+max_depth = st.slider("Max Layers to Search (Set high for far away targets):", 1, 6, 4)
 
 # --- Button logic ---
 button_placeholder = st.empty()
@@ -75,23 +74,20 @@ if st.session_state.bfs_queue is None:
 else:
     # If a search is currently paused or active, show "Resume"
     if button_placeholder.button("🔄 Resume Search Pipeline", use_container_width=True):
-        st.session_state.rate_limited = False # Clear the flag to try again
         st.rerun()
 
 # --- Core Processing Engine Loop ---
 if st.session_state.bfs_queue and not st.session_state.path_found:
     status_box = st.empty()
-    progress_bar = st.progress(0)
-    
     rate_limit_tripped = False
     
-    # Process up to 20 nodes per button click to prevent web timeouts
+    # Process up to 20 nodes per iteration step to prevent server execution timeouts
     nodes_to_process_this_turn = 20 
     
     while st.session_state.bfs_queue and nodes_to_process_this_turn > 0:
         current_node, path = st.session_state.bfs_queue.popleft()
         
-        # Stop if we exceed maximum depth limits
+        # Stop if this specific branch exceeds maximum depth limits
         if len(path) > max_depth:
             continue
             
@@ -105,7 +101,7 @@ if st.session_state.bfs_queue and not st.session_state.path_found:
         time.sleep(delay)
         
         if hit_429:
-            # Re-queue the current node so we don't lose it!
+            # Re-queue the current node so we don't lose it on pause
             st.session_state.bfs_queue.appendleft((current_node, path))
             rate_limit_tripped = True
             break
@@ -126,9 +122,8 @@ if st.session_state.bfs_queue and not st.session_state.path_found:
     if st.session_state.path_found:
         st.success(f"🎉 Connection Located successfully after {st.session_state.total_requests} lookups!")
         with st.spinner("Resolving user profiles..."):
-            names = resolve_usernames(st.session_state.st.session_state.final_chain if "final_chain" in st.session_state else st.session_state.final_chain)
-            # Fallback mapping context
             names = resolve_usernames(st.session_state.final_chain)
+            
         display_path = [names.get(uid, f"User {uid}") for uid in st.session_state.final_chain]
         st.info(" ➔ ".join(f"**{name}**" for name in display_path))
         
@@ -147,7 +142,7 @@ if st.session_state.bfs_queue and not st.session_state.path_found:
             st.session_state.bfs_queue = None
             st.rerun()
     else:
-        # If we finished our 20-node batch safely but haven't hit a wall or target, auto-refresh to keep going
+        # Automatic reload loop to process next node block smoothly
         st.rerun()
 
 # --- Sidebar Realtime Monitor ---
