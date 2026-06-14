@@ -3,10 +3,10 @@ import requests
 import time
 from collections import deque
 
-st.set_page_config(page_title="Unstoppable Pathfinder", layout="centered")
+st.set_page_config(page_title="Auto-Resuming Pathfinder", layout="centered")
 
-st.title("🛡️ Persistent Graph Pathfinder")
-st.write("This engine saves its state. If rate-limited, you can pause and resume without losing progress.")
+st.title("🛡️ Autonomous Graph Pathfinder")
+st.write("This engine automatically handles rate limits. If blocked, it waits 60s and resumes on its own.")
 
 # --- Initialize Session States ---
 if "bfs_queue" not in st.session_state:
@@ -29,7 +29,7 @@ def fetch_friends_persistent(user_id):
             data = response.json().get("data", [])
             return [f["id"] for f in data if not f.get("isDeleted", False)], False
         elif response.status_code == 429:
-            return [], True  # Trigger Rate Limit Flag
+            return [], True 
         return [], False
     except Exception:
         return [], False
@@ -51,20 +51,15 @@ col1, col2 = st.columns(2)
 start_input = col1.text_input("Starting User ID:", "", disabled=st.session_state.bfs_queue is not None)
 target_input = col2.text_input("Target User ID:", "", disabled=st.session_state.bfs_queue is not None)
 
-delay = st.slider("Delay between API requests (seconds):", 0.5, 3.0, 1.5, step=0.1)
-max_depth = st.slider("Max Layers to Search (Set high for far away targets):", 1, 6, 4)
+delay = st.slider("Request Delay (seconds):", 0.5, 3.0, 1.2, step=0.1)
+max_depth = st.slider("Max Search Layers (Degrees of Separation):", 1, 8, 4)
 
 # --- Button logic ---
-button_placeholder = st.empty()
-
-# If we haven't started a search yet, show "Start"
 if st.session_state.bfs_queue is None:
-    if button_placeholder.button("🚀 Start Deep Traversal", use_container_width=True):
+    if st.button("🚀 Start Deep Traversal", use_container_width=True):
         if start_input.isdigit() and target_input.isdigit():
             s_id = int(start_input)
             t_id = int(target_input)
-            
-            # Setup the engine state
             st.session_state.bfs_queue = deque([(s_id, [s_id])])
             st.session_state.visited = {s_id}
             st.session_state.total_requests = 0
@@ -72,81 +67,74 @@ if st.session_state.bfs_queue is None:
             st.session_state.target_id = t_id
             st.rerun()
 else:
-    # If a search is currently paused or active, show "Resume"
-    if button_placeholder.button("🔄 Resume Search Pipeline", use_container_width=True):
+    if st.button("🛑 Stop & Reset Engine", use_container_width=True):
+        st.session_state.bfs_queue = None
         st.rerun()
 
 # --- Core Processing Engine Loop ---
 if st.session_state.bfs_queue and not st.session_state.path_found:
     status_box = st.empty()
-    rate_limit_tripped = False
     
-    # Process up to 20 nodes per iteration step to prevent server execution timeouts
-    nodes_to_process_this_turn = 20 
+    # Process batch to prevent Streamlit timeout
+    nodes_to_process_this_turn = 15 
     
     while st.session_state.bfs_queue and nodes_to_process_this_turn > 0:
         current_node, path = st.session_state.bfs_queue.popleft()
         
-        # Stop if this specific branch exceeds maximum depth limits
         if len(path) > max_depth:
             continue
             
         st.session_state.total_requests += 1
         nodes_to_process_this_turn -= 1
         
-        status_box.text(f"Scanning node: {current_node} | Total API calls: {st.session_state.total_requests}")
+        status_box.info(f"🔍 Currently Scanning: {current_node} | Total Requests: {st.session_state.total_requests}")
         
-        # Run API Fetch
         friends, hit_429 = fetch_friends_persistent(current_node)
-        time.sleep(delay)
         
         if hit_429:
-            # Re-queue the current node so we don't lose it on pause
+            # Put the user back in the front of the queue
             st.session_state.bfs_queue.appendleft((current_node, path))
-            rate_limit_tripped = True
-            break
             
-        # Target Match Checking
+            st.error("🚨 Rate Limit Hit (429). Automating Wait Sequence...")
+            countdown_bar = st.progress(0)
+            for i in range(60, 0, -1):
+                status_box.warning(f"⏳ Cooling down... Resuming in {i} seconds.")
+                countdown_bar.progress((60 - i) / 60)
+                time.sleep(1)
+            st.rerun() # Refresh and try the exact same node again
+            
+        # Success logic
         if st.session_state.target_id in friends:
             st.session_state.final_chain = path + [st.session_state.target_id]
             st.session_state.path_found = True
             break
             
-        # Queue expansion
+        # Expand network
         for friend_id in friends:
             if friend_id not in st.session_state.visited:
                 st.session_state.visited.add(friend_id)
                 st.session_state.bfs_queue.append((friend_id, path + [friend_id]))
+        
+        time.sleep(delay)
 
-    # Loop evaluation
+    # Result Handling
     if st.session_state.path_found:
-        st.success(f"🎉 Connection Located successfully after {st.session_state.total_requests} lookups!")
-        with st.spinner("Resolving user profiles..."):
+        st.success(f"🎉 Path Found! Processed {st.session_state.total_requests} nodes.")
+        with st.spinner("Resolving Usernames..."):
             names = resolve_usernames(st.session_state.final_chain)
-            
+        
         display_path = [names.get(uid, f"User {uid}") for uid in st.session_state.final_chain]
+        st.write("### Connection Chain:")
         st.info(" ➔ ".join(f"**{name}**" for name in display_path))
         
-        # Reset button to allow clear operations
-        if st.button("Clear Engine Cache"):
-            st.session_state.bfs_queue = None
-            st.rerun()
-            
-    elif rate_limit_tripped:
-        st.error("🚨 Roblox API Rate Limit Hit (HTTP 429)!")
-        st.warning("Your current progress has been saved securely in the dashboard state. Please wait 60 seconds for the API limits to clear, then click 'Resume Search Pipeline' above.")
-        
     elif not st.session_state.bfs_queue:
-        st.error(f"Search concluded. No active connections found within {max_depth} layers.")
-        if st.button("Reset Engine"):
-            st.session_state.bfs_queue = None
-            st.rerun()
+        st.error(f"Search Finished. No path found within {max_depth} layers.")
     else:
-        # Automatic reload loop to process next node block smoothly
+        # Auto-refresh for next batch
         st.rerun()
 
-# --- Sidebar Realtime Monitor ---
-st.sidebar.header("📊 Live Engine Telemetry")
-st.sidebar.metric("Total API Calls Run", st.session_state.total_requests)
-st.sidebar.metric("Nodes Awaiting Scan", len(st.session_state.bfs_queue) if st.session_state.bfs_queue else 0)
-st.sidebar.metric("Unique Profiles Mapped", len(st.session_state.visited))
+# --- Sidebar Monitor ---
+st.sidebar.header("📊 Engine Health")
+st.sidebar.metric("API Calls", st.session_state.total_requests)
+st.sidebar.metric("Queue Size", len(st.session_state.bfs_queue) if st.session_state.bfs_queue else 0)
+st.sidebar.metric("Discovered Nodes", len(st.session_state.visited))
