@@ -52,13 +52,13 @@ def resolve_usernames(id_list):
     except Exception:
         return {}
 
-# --- UI Controls ---
+# --- User UI Controls ---
 col1, col2 = st.columns(2)
 start_input = col1.text_input("Starting User ID (You):", "", disabled=st.session_state.engine_active)
-target_input = col2.text_input("Target User ID (KreekCraft: 140671171):", "", disabled=st.session_state.engine_active)
+target_input = col2.text_input("Target User ID:", "", disabled=st.session_state.engine_active)
 
 delay = st.slider("Politeness Delay (seconds):", 0.3, 2.0, 0.7, step=0.1)
-max_total_depth = st.slider("Max Combined Path Length (Layers):", 2, 6, 4)
+max_total_depth = st.slider("Max Combined Path Length (Layers):", 2, 8, 4)
 
 # --- Control Buttons ---
 if not st.session_state.engine_active:
@@ -82,20 +82,19 @@ if not st.session_state.engine_active:
                     st.session_state.start_visited[f] = [s_id, f]
                     st.session_state.start_queue.append(f)
                 
-                # Seed Target Side (e.g., KreekCraft)
+                # Seed Target Side
                 t_friends, t_429 = fetch_friends_persistent(t_id)
                 st.session_state.total_requests += 1
                 
                 st.session_state.target_visited = {t_id: [t_id]}
                 st.session_state.target_queue = deque([t_id])
                 
-                # If target has a public friend list, seed all of them to create a massive capture net
                 if t_friends:
                     for f in t_friends:
                         st.session_state.target_visited[f] = [t_id, f]
                         st.session_state.target_queue.append(f)
                 
-                # Check for an immediate intersection (e.g., if you are already mutuals)
+                # Check for immediate match
                 common = set(st.session_state.start_visited.keys()) & set(st.session_state.target_visited.keys())
                 if common:
                     intersection_node = common.pop()
@@ -111,20 +110,19 @@ else:
         st.session_state.engine_active = False
         st.session_state.start_queue = None
         st.session_state.target_queue = None
+        st.session_state.path_found = False
+        st.session_state.final_chain = []
         st.rerun()
 
 # --- Core Processing Bidirectional Engine Loop ---
 if st.session_state.engine_active and not st.session_state.path_found:
     status_box = st.empty()
     direction_flag = "start"
-    
-    # Process 15 nodes per layout refresh execution flight
     nodes_to_process = 15
     
     while (st.session_state.start_queue or st.session_state.target_queue) and nodes_to_process > 0:
         nodes_to_process -= 1
         
-        # Performance optimization: Always expand the smaller queue size to save API calls
         if len(st.session_state.start_queue) <= len(st.session_state.target_queue) and st.session_state.start_queue:
             direction_flag = "start"
             current_node = st.session_state.start_queue.popleft()
@@ -136,7 +134,6 @@ if st.session_state.engine_active and not st.session_state.path_found:
         else:
             continue
             
-        # Circuit breaker for branch lengths
         if len(current_path) > (max_total_depth // 2) + 1:
             continue
             
@@ -146,7 +143,6 @@ if st.session_state.engine_active and not st.session_state.path_found:
         friends, hit_429 = fetch_friends_persistent(current_node)
         
         if hit_429:
-            # Re-queue the active node immediately to preserve state consistency
             if direction_flag == "start":
                 st.session_state.start_queue.appendleft(current_node)
             else:
@@ -160,11 +156,9 @@ if st.session_state.engine_active and not st.session_state.path_found:
                 time.sleep(1)
             st.rerun()
             
-        # Process and check discoveries
         for friend_id in friends:
             if direction_flag == "start":
                 if friend_id in st.session_state.target_visited:
-                    # Circle intersection located!
                     target_branch = st.session_state.target_visited[friend_id]
                     st.session_state.final_chain = current_path + target_branch[::-1]
                     st.session_state.path_found = True
@@ -174,7 +168,6 @@ if st.session_state.engine_active and not st.session_state.path_found:
                     st.session_state.start_queue.append(friend_id)
             else:
                 if friend_id in st.session_state.start_visited:
-                    # Circle intersection located!
                     start_branch = st.session_state.start_visited[friend_id]
                     st.session_state.final_chain = start_branch + current_path[::-1]
                     st.session_state.path_found = True
@@ -188,29 +181,35 @@ if st.session_state.engine_active and not st.session_state.path_found:
             
         time.sleep(delay)
 
-    # Resolve Execution Finish States
     if st.session_state.path_found:
-        status_box.empty()
-        st.success(f"🎯 Connection Map Found Rapidly inside {st.session_state.total_requests} API queries!")
-        
-        # Clean duplicates from the raw array splice
-        clean_chain = []
-        for uid in st.session_state.final_chain:
-            if uid not in clean_chain:
-                clean_chain.append(uid)
-                
-        with st.spinner("Resolving username handles across network maps..."):
-            names = resolve_usernames(clean_chain)
+        st.rerun()
+    elif st.session_state.engine_active and not st.session_state.start_queue and not st.session_state.target_queue:
+        st.error(f"Search complete. No pathways connect these users within {max_total_depth} layers.")
+    elif st.session_state.engine_active:
+        st.rerun()
+
+# --- Render Results Outside the Loop ---
+if st.session_state.path_found:
+    st.success(f"🎯 Connection Map Found Rapidly inside {st.session_state.total_requests} API queries!")
+    
+    clean_chain = []
+    for uid in st.session_state.final_chain:
+        if uid not in clean_chain:
+            clean_chain.append(uid)
             
-        display_path = [names.get(uid, f"User {uid}") for uid in clean_chain]
-        st.write("### 🏁 Verified Connection Chain:")
-        st.info(" ➔ ".join(f"**{name}**" for name in display_path))
-        st.metric("Degrees of Separation Matrix", f"{len(clean_chain) - 1} Steps Away")
+    with st.spinner("Resolving username handles across network maps..."):
+        names = resolve_usernames(clean_chain)
         
-    elif not st.session_state.start_queue and not st.session_state.target_queue:
-        st.error(f"Search complete. No structural pathways connect these two users within {max_total_depth} layers.")
-    else:
-        # Pipeline auto-refresh step iteration
+    display_path = [names.get(uid, f"User {uid}") for uid in clean_chain]
+    st.write("### 🏁 Verified Connection Chain:")
+    st.info(" ➔ ".join(f"**{name}**" for name in display_path))
+    
+    if st.button("Clear Engine Cache and Start New Search"):
+        st.session_state.engine_active = False
+        st.session_state.start_queue = None
+        st.session_state.target_queue = None
+        st.session_state.path_found = False
+        st.session_state.final_chain = []
         st.rerun()
 
 # --- Sidebar Realtime Monitor ---
@@ -218,4 +217,4 @@ st.sidebar.header("📊 Engine Health")
 st.sidebar.metric("API Requests Sent", st.session_state.total_requests)
 st.sidebar.metric("Your Front Base Nodes", len(st.session_state.start_queue) if st.session_state.start_queue else 0)
 st.sidebar.metric("Target Capture Base Nodes", len(st.session_state.target_queue) if st.session_state.target_queue else 0)
-st.sidebar.metric("Total Mapped Users", len(st.session_state.start_visited) + len(st.session_state.target_visited))
+st.sidebar.metric("Total Mapped Users", len(st.session_state.start_visited) + len(st.session_state.target_visited) if ("start_visited" in st.session_state and "target_visited" in st.session_state) else 0)
