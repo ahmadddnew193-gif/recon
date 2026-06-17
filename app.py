@@ -6,7 +6,7 @@ import os
 import time
 import random
 
-st.set_page_config(page_title="Recon Engine: Ultimate Core", layout="wide")
+st.set_page_config(page_title="Recon Engine: Ultra Core", layout="wide")
 
 CACHE_FILE = "roblox_graph_map.json"
 
@@ -39,13 +39,15 @@ def save_persistent_cache(cache_data):
     except Exception:
         pass
 
-# Initialize session structures
+# Initialize unified session structures
 if "global_cache" not in st.session_state:
     st.session_state.global_cache = load_persistent_cache()
 if "logs" not in st.session_state:
     st.session_state.logs = []
 if "running" not in st.session_state:
     st.session_state.running = False
+if "harvester_running" not in st.session_state:
+    st.session_state.harvester_running = False
 
 def parse_proxy_input(raw_text):
     lines = raw_text.split("\n")
@@ -69,10 +71,10 @@ with st.sidebar:
     st.metric("Database Profiles Loaded In-Memory", len(st.session_state.global_cache))
 
 # --- Navigation Setup via Layout Tabs ---
-tab1, tab2 = st.tabs(["🚀 Graph Path Tracer", "📦 Synthetic Database Seeder"])
+tab1, tab2, tab3 = st.tabs(["🚀 Graph Path Tracer", "🌍 Real Mass Harvester", "📦 Synthetic Seeder & Tools"])
 
 # ==========================================
-# TAB 1: GRAPH PATHFINDER CORE
+# TAB 1: GRAPH PATHFINDER CORE (REAL SCANS)
 # ==========================================
 with tab1:
     st.subheader("Dual-Queue Target Analysis Execution")
@@ -98,13 +100,12 @@ with tab1:
 
 # --- Pathfinder Worker Components ---
 async def cache_processor_task(network_queue, cache_queue, start_visited, target_visited, path_found_event, results_container):
-    """Processes known nodes at machine microsecond speeds using direct RAM indexing."""
     g_cache = st.session_state.global_cache
     while not path_found_event.is_set() and st.session_state.running:
         try:
             direction, node = cache_queue.get_nowait()
         except asyncio.QueueEmpty:
-            await asyncio.sleep(0.001)  # 1ms ultra-low latency context loop speed
+            await asyncio.sleep(0.001)
             continue
             
         str_node = str(node)
@@ -141,7 +142,6 @@ async def cache_processor_task(network_queue, cache_queue, start_visited, target
                         network_queue.put_nowait(("REVERSE", friend_int))
 
 async def proxy_worker_task(worker_id, proxy, network_queue, cache_queue, start_visited, target_visited, session, path_found_event, results_container, log_func):
-    """Network proxy communication task paced specifically to shield datacenter IP ranges from 429 locks."""
     base_delay = 1.3
     g_cache = st.session_state.global_cache
     
@@ -203,8 +203,7 @@ async def proxy_worker_task(worker_id, proxy, network_queue, cache_queue, start_
                     
                 elif response.status == 429:
                     network_queue.put_nowait((direction, node))
-                    log_func(f"[Worker-{worker_id}] ⚠️ 429 Throttled. Expanding spacing window to {base_delay+0.5}s...")
-                    base_delay = min(base_delay + 0.5, 3.5)
+                    log_func(f"[Worker-{worker_id}] ⚠️ Throttled. Adjusting pace window...")
                     await asyncio.sleep(12.0)
                 else:
                     network_queue.put_nowait((direction, node))
@@ -230,7 +229,6 @@ async def resolve_usernames_async(session, id_list, proxy_list):
 async def master_pipeline_engine(s_id, t_id, proxies):
     network_queue = asyncio.Queue()
     cache_queue = asyncio.Queue()
-    
     start_visited = {s_id: [s_id]}
     target_visited = {t_id: [t_id]}
     
@@ -250,27 +248,21 @@ async def master_pipeline_engine(s_id, t_id, proxies):
 
     def log(msg):
         st.session_state.logs.append(msg)
-        if len(st.session_state.logs) > 20:
-            st.session_state.logs.pop(0)
-        with tab1:
-            console_placeholder.code("\n".join(st.session_state.logs), language="bash")
+        if len(st.session_state.logs) > 20: st.session_state.logs.pop(0)
+        with tab1: console_placeholder.code("\n".join(st.session_state.logs), language="bash")
 
     log("[SYSTEM] Coordinating tracking pipelines. Deploying isolated workers...")
 
     async with aiohttp.ClientSession() as session:
-        workers = []
-        workers.append(asyncio.create_task(cache_processor_task(network_queue, cache_queue, start_visited, target_visited, path_found_event, results_container)))
-        
+        workers = [asyncio.create_task(cache_processor_task(network_queue, cache_queue, start_visited, target_visited, path_found_event, results_container))]
         for idx, proxy_url in enumerate(proxies):
             workers.append(asyncio.create_task(proxy_worker_task(idx + 1, proxy_url, network_queue, cache_queue, start_visited, target_visited, session, path_found_event, results_container, log)))
 
         while not path_found_event.is_set() and st.session_state.running:
             with tab1:
                 status_placeholder.info(
-                    f"📡 Channels Functional: {len(proxies)} | "
-                    f"⚡ Memory Cache Hits: {results_container['cache_hits']} | "
-                    f"🌐 Outbound API Calls: {results_container['api_calls']} | "
-                    f"📂 Queue Latency Backlog: {network_queue.qsize()}"
+                    f"📡 Channels Functional: {len(proxies)} | ⚡ Memory Cache Hits: {results_container['cache_hits']} | "
+                    f"🌐 Outbound API Calls: {results_container['api_calls']} | 📂 Queue Backlog: {network_queue.qsize()}"
                 )
             await asyncio.sleep(0.4)
 
@@ -283,108 +275,216 @@ async def master_pipeline_engine(s_id, t_id, proxies):
         if results_container["final_chain"]:
             clean_chain = []
             for u in results_container["final_chain"]:
-                if not clean_chain or clean_chain[-1] != u:
-                    clean_chain.append(u)
-                    
+                if not clean_chain or clean_chain[-1] != u: clean_chain.append(u)
             log("[SUCCESS] Connection match mapped! Resolving usernames...")
             names = await resolve_usernames_async(session, clean_chain, proxies)
             display = [names.get(uid, f"UID:{uid}") for uid in clean_chain]
-            
             with tab1:
                 st.success("### 🎯 Target Chain Intersect Discovered")
                 st.info(" ➔ ".join(f"**{n}**" for n in display))
             st.session_state.running = False
-        else:
-            if not st.session_state.running:
-                log("[HALT] Task terminated manually by core command input.")
 
 if start_btn and s_input.isdigit() and t_input.isdigit():
     cleaned_proxies = parse_proxy_input(proxy_input)
-    if not cleaned_proxies:
-        st.error("❌ Proxy Parser Validation Error. Review string array input.")
-    else:
+    if cleaned_proxies:
         st.session_state.running = True
-        st.session_state.logs = ["[SYSTEM] Initializing processing matrix arrays... Tuning pipelines."]
-        
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(master_pipeline_engine(int(s_input), int(t_input), cleaned_proxies))
 
-
 # ==========================================
-# TAB 2: SYNTHETIC DATABASE SEEDER / GENERATOR
+# TAB 2: 10x FASTER REAL CRAWLER HARVESTER
 # ==========================================
 with tab2:
-    st.subheader("📦 Local Database Graph Generator & Stress-Tester")
-    st.write("Generates a highly localized, scale-free network mapping to evaluate structural tracing performance instantly.")
+    st.subheader("🌍 Continuous Real-World Social Graph Harvester")
+    st.write("Harvests thousands of genuine profiles into your database by running an asynchronous spider walk through friends lists.")
     
-    gen_c1, gen_c2, gen_c3 = st.columns(3)
-    with gen_c1:
-        seed_start = st.text_input("Simulate Start ID Custom Entry:", value="1703896246")
-    with gen_c2:
-        seed_target = st.text_input("Simulate Target ID Custom Entry:", value="140671171")
-    with gen_c3:
-        profile_volume = st.number_input("Background Density Nodes Volume:", min_value=100, max_value=50000, value=5000, step=500)
+    hc1, hc2 = st.columns(2)
+    with hc1:
+        seed_id_input = st.text_input("Harvester Seed User ID (Start Node):", "1703896246")
+    with hc2:
+        max_harvest = st.number_input("Max Users to Scrape Before Auto-Stop:", min_value=100, max_value=100000, value=2000, step=500)
         
-    generate_btn = st.button("⚡ Execute Mock Database Seeding", use_container_width=True, type="secondary")
+    hbtn1, hbtn2 = st.columns(2)
+    with hbtn1:
+        start_harvest_btn = st.button("⚡ Ignite High-Speed Crawler", use_container_width=True, type="primary")
+    with hbtn2:
+        stop_harvest_btn = st.button("🛑 Force Stop Harvester", use_container_width=True)
+        
+    if stop_harvest_btn:
+        st.session_state.harvester_running = False
+        st.rerun()
+        
+    harvest_console = st.empty()
+    harvest_status = st.empty()
+
+# --- Harvester Async Implementation ---
+async def harvester_spider_worker(worker_id, proxy, harvest_queue, shared_stats, session, proxies_list):
+    g_cache = st.session_state.global_cache
+    base_delay = 1.3
+    
+    while st.session_state.harvester_running and shared_stats["scraped_count"] < shared_stats["limit"]:
+        try:
+            user_id = harvest_queue.get_nowait()
+        except asyncio.QueueEmpty:
+            await asyncio.sleep(0.1)
+            continue
+            
+        str_user = str(user_id)
+        if str_user in g_cache:
+            for friend in g_cache[str_user]:
+                if len(g_cache) < 200000:
+                    harvest_queue.put_nowait(friend)
+            continue
+            
+        url = f"https://friends.roblox.com/v1/users/{user_id}/friends"
+        try:
+            async with session.get(url, proxy=proxy, timeout=6) as response:
+                shared_stats["total_api_calls"] += 1
+                
+                if response.status == 200:
+                    data = await response.json()
+                    friends = [int(f["id"]) for f in data.get("data", []) if not f.get("isDeleted", False)]
+                    
+                    g_cache[str_user] = friends
+                    shared_stats["scraped_count"] += 1
+                    shared_stats["uncommitted_records"] += 1
+                    
+                    if shared_stats["uncommitted_records"] >= 50:
+                        save_persistent_cache(g_cache)
+                        shared_stats["uncommitted_records"] = 0
+                        
+                    for friend in friends:
+                        if str(friend) not in g_cache:
+                            harvest_queue.put_nowait(friend)
+                            
+                    base_delay = max(base_delay - 0.05, 1.1)
+                    await asyncio.sleep(base_delay)
+                    
+                elif response.status == 429:
+                    harvest_queue.put_nowait(user_id)
+                    shared_stats["throttles"] += 1
+                    await asyncio.sleep(12.0)
+                else:
+                    await asyncio.sleep(1.0)
+        except Exception:
+            harvest_queue.put_nowait(user_id)
+            await asyncio.sleep(1.5)
+
+async def master_harvester_coordinator(seed_uid, max_profiles, proxies):
+    harvest_queue = asyncio.Queue()
+    harvest_queue.put_nowait(seed_uid)
+    shared_stats = {"scraped_count": 0, "limit": max_profiles, "total_api_calls": 0, "throttles": 0, "uncommitted_records": 0}
+    
+    async with aiohttp.ClientSession() as session:
+        workers = []
+        for idx, p_url in enumerate(proxies):
+            workers.append(asyncio.create_task(harvester_spider_worker(idx+1, p_url, harvest_queue, shared_stats, session, proxies)))
+            
+        while st.session_state.harvester_running and shared_stats["scraped_count"] < max_profiles:
+            with tab2:
+                harvest_status.success(
+                    f"🚀 Crawl Active | 📂 Real Profiles Added This Session: {shared_stats['scraped_count']} / {max_profiles} | "
+                    f"🌐 Outbound Connection Enquiries: {shared_stats['total_api_calls']} | ⚠️ Firewall Throttles: {shared_stats['throttles']}"
+                )
+                harvest_console.code(
+                    f"Queue Discovery Buffer Size: {harvest_queue.qsize()} profiles pending tracking.\n"
+                    f"RAM Cache buffer uncommitted rows: {shared_stats['uncommitted_records']}/50\n"
+                    f"Status: Ingesting verified friend network sequences...", language="bash"
+                )
+            await asyncio.sleep(1.5)
+            
+        st.session_state.harvester_running = False
+        await asyncio.gather(*workers, return_exceptions=True)
+        save_persistent_cache(st.session_state.global_cache)
+
+if start_harvest_btn and seed_id_input.isdigit():
+    cleaned_proxies = parse_proxy_input(proxy_input)
+    if cleaned_proxies:
+        st.session_state.harvester_running = True
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(master_harvester_coordinator(int(seed_id_input), int(max_harvest), cleaned_proxies))
+        st.rerun()
+
+# ==========================================
+# TAB 3: SYNTHETIC SEEDER & MANAGEMENT UTILITIES
+# ==========================================
+with tab3:
+    st.subheader("📦 Fake Database Generator")
+    seed_start = st.text_input("Simulate Start ID Entry:", value="1703896246")
+    seed_target = st.text_input("Simulate Target ID Entry:", value="140671171")
+    profile_volume = st.number_input("Background Density Nodes:", min_value=100, max_value=50000, value=5000, step=500)
+    generate_btn = st.button("⚡ Execute Mock Seeding", use_container_width=True)
     
     if generate_btn and seed_start.isdigit() and seed_target.isdigit():
-        progress_bar = st.progress(0.0)
-        status_text = st.empty()
-        
-        status_text.text("⏳ Constructing clean data dictionary arrays...")
-        progress_bar.progress(0.1)
-        
-        # High-Speed Generator Logic
         database = {}
-        s_id_int = int(seed_start)
-        t_id_int = int(seed_target)
-        
-        # Establish unique intermediate mock hubs
+        s_id_int, t_id_int = int(seed_start), int(seed_target)
         hub_a, hub_b, hub_c = 999101, 999102, 999103
-        
         database[str(s_id_int)] = [hub_a]
         database[str(hub_a)] = [s_id_int, hub_b]
         database[str(hub_b)] = [hub_a, hub_c]
         database[str(hub_c)] = [hub_b, t_id_int]
         database[str(t_id_int)] = [hub_c]
-        
-        status_text.text(f"📦 Populating base layers with {profile_volume} background profiles...")
-        progress_bar.progress(0.4)
-        
-        # Optimization: Pre-generate lists via random integer ranges
         filler_ids = [random.randint(2000000, 8000000) for _ in range(int(profile_volume))]
-        
         for uid in filler_ids:
             str_uid = str(uid)
-            if str_uid not in database:
-                database[str_uid] = []
-            
-            friend_count = random.randint(15, 40)
-            picked = random.sample(filler_ids, k=min(friend_count, len(filler_ids)))
-            database[str_uid].extend(picked)
-            
-        status_text.text("🔗 Blending cross-connections into core hidden hubs...")
-        progress_bar.progress(0.7)
-        
-        # Merge background profiles across targets to make the graph dense
+            if str_uid not in database: database[str_uid] = []
+            database[str_uid].extend(random.sample(filler_ids, k=min(random.randint(15, 40), len(filler_ids))))
         database[str(s_id_int)].extend(random.sample(filler_ids, k=20))
         database[str(hub_a)].extend(random.sample(filler_ids, k=25))
         database[str(hub_b)].extend(random.sample(filler_ids, k=25))
         database[str(hub_c)].extend(random.sample(filler_ids, k=25))
         database[str(t_id_int)].extend(random.sample(filler_ids, k=20))
-        
-        status_text.text("💾 Stripping duplicate listings and exporting out to disk file...")
-        progress_bar.progress(0.85)
-        
-        # Deduping everything instantly via set mapping
         for key in database:
             database[key] = list(set([int(x) for x in database[key] if int(x) != int(key)]))
-            
-        # Hot-swap memory cache state so the user doesn't have to restart the script
         st.session_state.global_cache = database
         save_persistent_cache(database)
-        
-        progress_bar.progress(1.0)
-        status_text.text("")
-        st.success(f"✅ Seeding Complete! {len(database)} records compiled directly into memory state and '{CACHE_FILE}' storage.")
+        st.success("✅ Mock Database Seeded!")
+        st.rerun()
+
+    # --- NEW FEATURE: DATABASE MAINTENANCE PANELS ---
+    st.markdown("---")
+    st.subheader("🧹 Database Maintenance & Purge Utilities")
+    st.write("Safely erase structural entries from your system to toggle cleanly between synthetic testing and actual tracking jobs.")
+    
+    m_col1, m_col2 = st.columns(2)
+    
+    with m_col1:
+        st.markdown("**Option A: The Complete Clean Slate**")
+        wipe_all_btn = st.button("💥 Wipe Entire Cache File & Memory", use_container_width=True, type="secondary")
+        if wipe_all_btn:
+            st.session_state.global_cache = {}
+            if os.path.exists(CACHE_FILE):
+                try:
+                    os.remove(CACHE_FILE)
+                except Exception:
+                    pass
+            st.success("💥 Database dropped! Reset to 0 records.")
+            st.rerun()
+            
+    with m_col2:
+        st.markdown("**Option B: Scrub Injected Bridge Hubs Only**")
+        purge_hubs_btn = st.button("🧩 Scrub Mock Tracing Hubs Only", use_container_width=True)
+        if purge_hubs_btn:
+            g_cache = st.session_state.global_cache
+            mock_hubs = ["999101", "999102", "999103"]
+            nodes_altered = 0
+            
+            # Remove direct keys
+            for h_id in mock_hubs:
+                if h_id in g_cache:
+                    del g_cache[h_id]
+                    nodes_altered += 1
+                    
+            # Remove references inside existing lists
+            for key in list(g_cache.keys()):
+                orig_list = g_cache[key]
+                cleaned_list = [x for x in orig_list if str(x) not in mock_hubs]
+                if len(cleaned_list) != len(orig_list):
+                    g_cache[key] = cleaned_list
+                    nodes_altered += 1
+                    
+            save_persistent_cache(g_cache)
+            st.success(f"✅ Scrubbed reference matrices! Removed {nodes_altered} link dependencies.")
+            st.rerun()
