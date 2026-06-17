@@ -64,6 +64,51 @@ def parse_proxy_input(raw_text):
             cleaned.append(f"http://{parts[2]}:{parts[3]}@{parts[0]}:{parts[1]}")
     return cleaned
 
+# --- FEATURE 3: TACTICAL HTML NODE CHAIN UI VISUALIZER ---
+def render_cyber_graph_ui(enriched_nodes):
+    html_elements = ""
+    for idx, node in enumerate(enriched_nodes):
+        is_endpoint = (idx == 0 or idx == len(enriched_nodes) - 1)
+        bg_color = "#111625" if is_endpoint else "#201612"
+        border_color = "#00E5FF" if is_endpoint else "#FF6D00"
+        text_color = "#E0E0E0"
+        
+        # Identify suspected routing alts (Accounts created in 2025 or 2026)
+        created_year = node["created"][:4]
+        is_suspected_alt = str(created_year) in ["2025", "2026"] and not is_endpoint
+        alt_badge = """<div style="color: #FF3D00; font-size: 10px; margin-top: 4px; font-weight: bold; text-shadow: 0 0 5px rgba(255,61,0,0.4);">⚠️ SUSPECTED ALT</div>""" if is_suspected_alt else ""
+        banned_badge = """<div style="color: #FF1744; font-size: 10px; margin-top: 4px; font-weight: bold;">🚫 BANNED</div>""" if node["isBanned"] else ""
+
+        role_label = "START TARGET" if idx == 0 else ("END TARGET" if idx == len(enriched_nodes) - 1 else f"BRIDGE NODE {idx}")
+
+        html_elements += f"""
+        <div style="display: flex; align-items: center; margin: 10px 0;">
+            <div style="background-color: {bg_color}; border: 1px solid {border_color}; 
+                        padding: 14px; border-radius: 6px; color: {text_color}; 
+                        font-family: 'Courier New', monospace; min-width: 170px; text-align: left;
+                        box-shadow: 0 0 15px rgba(0,0,0,0.5);">
+                <div style="font-size: 9px; color: {border_color}; font-weight: bold; letter-spacing: 1px;">{role_label}</div>
+                <div style="font-size: 14px; margin-top: 4px; font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{node['name']}</div>
+                <div style="font-size: 11px; opacity: 0.6; margin-top: 2px;">ID: {node['id']}</div>
+                <div style="font-size: 10px; opacity: 0.5; margin-top: 4px;">Born: {node['created']}</div>
+                {alt_badge}
+                {banned_badge}
+            </div>
+        """
+        if idx < len(enriched_nodes) - 1:
+            html_elements += """
+            <div style="padding: 0 12px; color: #00E5FF; font-size: 20px; font-weight: bold; 
+                        font-family: monospace; text-shadow: 0 0 8px rgba(0,229,255,0.6);">➔</div>
+            """
+            
+    full_container = f"""
+    <div style="display: flex; flex-wrap: wrap; align-items: center; padding: 15px; 
+                background-color: #070913; border-radius: 8px; border: 1px solid #1A1F35; margin-bottom: 20px;">
+        {html_elements}
+    </div>
+    """
+    st.components.v1.html(full_container, height=160, scrolling=True)
+
 # --- Sidebar Configuration Control Array ---
 with st.sidebar:
     st.header("⚙️ Global Control Array")
@@ -98,8 +143,9 @@ with tab1:
 
     console_placeholder = st.empty()
     status_placeholder = st.empty()
+    group_placeholder = st.empty()
 
-# --- Pathfinder Worker Components ---
+# --- Async Core Processing Utilities (Optimized for Speed) ---
 async def cache_processor_task(network_queue, cache_queue, start_visited, target_visited, path_found_event, results_container):
     g_cache = st.session_state.global_cache
     while not path_found_event.is_set() and st.session_state.running:
@@ -143,14 +189,14 @@ async def cache_processor_task(network_queue, cache_queue, start_visited, target
                         network_queue.put_nowait(("REVERSE", friend_int))
 
 async def proxy_worker_task(worker_id, proxy, network_queue, cache_queue, start_visited, target_visited, session, path_found_event, results_container, log_func):
-    base_delay = 1.3
+    base_delay = 1.1
     g_cache = st.session_state.global_cache
     
     while not path_found_event.is_set() and st.session_state.running:
         try:
             direction, node = network_queue.get_nowait()
         except asyncio.QueueEmpty:
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(0.02)
             continue
             
         str_node = str(node)
@@ -165,7 +211,7 @@ async def proxy_worker_task(worker_id, proxy, network_queue, cache_queue, start_
             
         url = f"https://friends.roblox.com/v1/users/{node}/friends"
         try:
-            async with session.get(url, proxy=proxy, timeout=6) as response:
+            async with session.get(url, proxy=proxy, timeout=5) as response:
                 results_container["api_calls"] += 1
                 
                 if response.status == 200:
@@ -199,33 +245,63 @@ async def proxy_worker_task(worker_id, proxy, network_queue, cache_queue, start_
                                 else:
                                     network_queue.put_nowait(("REVERSE", friend))
                                     
-                    base_delay = max(base_delay - 0.05, 1.1)
+                    base_delay = max(base_delay - 0.05, 0.9)
                     await asyncio.sleep(base_delay)
                     
                 elif response.status == 429:
                     network_queue.put_nowait((direction, node))
-                    log_func(f"[Worker-{worker_id}] ⚠️ Throttled. Adjusting pace window...")
-                    await asyncio.sleep(12.0)
+                    await asyncio.sleep(10.0)
                 else:
                     network_queue.put_nowait((direction, node))
                     await asyncio.sleep(1.0)
         except Exception:
             network_queue.put_nowait((direction, node))
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(1.0)
 
-async def resolve_usernames_async(session, id_list, proxy_list):
-    if not id_list:
-        return {}
-    url = "https://users.roblox.com/v1/users"
+# --- FEATURE 1: GROUP INTERSECTION FINDER PROTOCOL ---
+async def fetch_user_groups_async(session, user_id, proxy_list):
+    url = f"https://groups.roblox.com/v1/users/{user_id}/groups/roles"
     proxy = random.choice(proxy_list) if proxy_list else None
     try:
-        async with session.post(url, json={"userIds": id_list, "excludeBannedUsers": False}, proxy=proxy, timeout=5) as response:
+        async with session.get(url, proxy=proxy, timeout=5) as response:
             if response.status == 200:
                 data = await response.json()
-                return {u["id"]: u["name"] for u in data.get("data", [])}
-        return {}
+                return {g["group"]["id"]: g["group"]["name"] for g in data.get("data", [])}
     except Exception:
-        return {}
+        pass
+    return {}
+
+async def execute_group_intersection_scan(session, s_id, t_id, proxies, placeholder):
+    s_groups, t_groups = await asyncio.gather(
+        fetch_user_groups_async(session, s_id, proxies),
+        fetch_user_groups_async(session, t_id, proxies)
+    )
+    shared_ids = set(s_groups.keys()).intersection(set(t_groups.keys()))
+    with placeholder:
+        if shared_ids:
+            st.warning(f"🎯 Direct Group Cross-Over Vector Detected! Found {len(shared_ids)} shared groups:")
+            for gid in shared_ids:
+                st.markdown(f"• **Group:** {s_groups[gid]} `(ID: {gid})` ➔ [View Group](https://www.roblox.com/groups/{gid})")
+        else:
+            st.info("ℹ️ No directly shared structural Roblox Group vectors identified.")
+
+# --- FEATURE 2: DEEP PROFILE INTELLIGENCE ENRICHMENT MATRIX ---
+async def fetch_profile_intel_async(session, user_id, proxy_list):
+    user_url = f"https://users.roblox.com/v1/users/{user_id}"
+    proxy = random.choice(proxy_list) if proxy_list else None
+    try:
+        async with session.get(user_url, proxy=proxy, timeout=5) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                return {
+                    "id": user_id,
+                    "name": data.get("name", f"UID:{user_id}"),
+                    "created": data.get("created", "Unknown")[:10],
+                    "isBanned": data.get("isBanned", False)
+                }
+    except Exception:
+        pass
+    return {"id": user_id, "name": f"UID:{user_id}", "created": "Unknown", "isBanned": False}
 
 async def master_pipeline_engine(s_id, t_id, proxies):
     network_queue = asyncio.Queue()
@@ -234,15 +310,11 @@ async def master_pipeline_engine(s_id, t_id, proxies):
     target_visited = {t_id: [t_id]}
     
     g_cache = st.session_state.global_cache
-    if str(s_id) in g_cache:
-        cache_queue.put_nowait(("FORWARD", s_id))
-    else:
-        network_queue.put_nowait(("FORWARD", s_id))
+    if str(s_id) in g_cache: cache_queue.put_nowait(("FORWARD", s_id))
+    else: network_queue.put_nowait(("FORWARD", s_id))
         
-    if str(t_id) in g_cache:
-        cache_queue.put_nowait(("REVERSE", t_id))
-    else:
-        network_queue.put_nowait(("REVERSE", t_id))
+    if str(t_id) in g_cache: cache_queue.put_nowait(("REVERSE", t_id))
+    else: network_queue.put_nowait(("REVERSE", t_id))
         
     path_found_event = asyncio.Event()
     results_container = {"final_chain": [], "api_calls": 0, "cache_hits": 0, "new_discoveries": {}}
@@ -252,9 +324,12 @@ async def master_pipeline_engine(s_id, t_id, proxies):
         if len(st.session_state.logs) > 20: st.session_state.logs.pop(0)
         with tab1: console_placeholder.code("\n".join(st.session_state.logs), language="bash")
 
-    log("[SYSTEM] Coordinating tracking pipelines. Deploying isolated workers...")
+    log("[SYSTEM] Coordinating tracing pipelines. Deploying isolated swarm array...")
 
     async with aiohttp.ClientSession() as session:
+        # Kick off Group Intersection Check parallel to the routing engine
+        asyncio.create_task(execute_group_intersection_scan(session, s_id, t_id, proxies, group_placeholder))
+        
         workers = [asyncio.create_task(cache_processor_task(network_queue, cache_queue, start_visited, target_visited, path_found_event, results_container))]
         for idx, proxy_url in enumerate(proxies):
             workers.append(asyncio.create_task(proxy_worker_task(idx + 1, proxy_url, network_queue, cache_queue, start_visited, target_visited, session, path_found_event, results_container, log)))
@@ -265,7 +340,7 @@ async def master_pipeline_engine(s_id, t_id, proxies):
                     f"📡 Channels Functional: {len(proxies)} | ⚡ Memory Cache Hits: {results_container['cache_hits']} | "
                     f"🌐 Outbound API Calls: {results_container['api_calls']} | 📂 Queue Backlog: {network_queue.qsize()}"
                 )
-            await asyncio.sleep(0.4)
+            await asyncio.sleep(0.2)
 
         path_found_event.set()
         await asyncio.gather(*workers, return_exceptions=True)
@@ -277,13 +352,20 @@ async def master_pipeline_engine(s_id, t_id, proxies):
             clean_chain = []
             for u in results_container["final_chain"]:
                 if not clean_chain or clean_chain[-1] != u: clean_chain.append(u)
-            log("[SUCCESS] Connection match mapped! Resolving usernames...")
-            names = await resolve_usernames_async(session, clean_chain, proxies)
-            display = [names.get(uid, f"UID:{uid}") for uid in clean_chain]
+                
+            log("[SUCCESS] Connection match mapped! Extracting intelligence telemetry profiles...")
+            
+            # Optimized Parallel Batch Intelligence Enrichment
+            intel_tasks = [fetch_profile_intel_async(session, uid, proxies) for uid in clean_chain]
+            enriched_profiles = await asyncio.gather(*intel_tasks)
+            
             with tab1:
                 st.success("### 🎯 Target Chain Intersect Discovered")
-                st.info(" ➔ ".join(f"**{n}**" for n in display))
-            st.session_state.running = False
+                # Trigger Feature 3 Graphic UI Array Injection
+                render_cyber_graph_ui(enriched_profiles)
+        else:
+            log("[SYSTEM] Graph lookup complete. No direct friend connection chain found inside layer parameters.")
+        st.session_state.running = False
 
 if start_btn and s_input.isdigit() and t_input.isdigit():
     cleaned_proxies = parse_proxy_input(proxy_input)
@@ -319,16 +401,15 @@ with tab2:
     harvest_console = st.empty()
     harvest_status = st.empty()
 
-# --- Harvester Async Implementation ---
 async def harvester_spider_worker(worker_id, proxy, harvest_queue, shared_stats, session, proxies_list):
     g_cache = st.session_state.global_cache
-    base_delay = 1.3
+    base_delay = 1.1
     
     while st.session_state.harvester_running and shared_stats["scraped_count"] < shared_stats["limit"]:
         try:
             user_id = harvest_queue.get_nowait()
         except asyncio.QueueEmpty:
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.05)
             continue
             
         str_user = str(user_id)
@@ -340,7 +421,7 @@ async def harvester_spider_worker(worker_id, proxy, harvest_queue, shared_stats,
             
         url = f"https://friends.roblox.com/v1/users/{user_id}/friends"
         try:
-            async with session.get(url, proxy=proxy, timeout=6) as response:
+            async with session.get(url, proxy=proxy, timeout=5) as response:
                 shared_stats["total_api_calls"] += 1
                 
                 if response.status == 200:
@@ -351,7 +432,7 @@ async def harvester_spider_worker(worker_id, proxy, harvest_queue, shared_stats,
                     shared_stats["scraped_count"] += 1
                     shared_stats["uncommitted_records"] += 1
                     
-                    if shared_stats["uncommitted_records"] >= 50:
+                    if shared_stats["uncommitted_records"] >= 100:
                         save_persistent_cache(g_cache)
                         shared_stats["uncommitted_records"] = 0
                         
@@ -359,18 +440,18 @@ async def harvester_spider_worker(worker_id, proxy, harvest_queue, shared_stats,
                         if str(friend) not in g_cache:
                             harvest_queue.put_nowait(friend)
                             
-                    base_delay = max(base_delay - 0.05, 1.1)
+                    base_delay = max(base_delay - 0.05, 0.9)
                     await asyncio.sleep(base_delay)
                     
                 elif response.status == 429:
                     harvest_queue.put_nowait(user_id)
                     shared_stats["throttles"] += 1
-                    await asyncio.sleep(12.0)
+                    await asyncio.sleep(10.0)
                 else:
                     await asyncio.sleep(1.0)
         except Exception:
             harvest_queue.put_nowait(user_id)
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(1.0)
 
 async def master_harvester_coordinator(seed_uid, max_profiles, proxies):
     harvest_queue = asyncio.Queue()
@@ -390,10 +471,10 @@ async def master_harvester_coordinator(seed_uid, max_profiles, proxies):
                 )
                 harvest_console.code(
                     f"Queue Discovery Buffer Size: {harvest_queue.qsize()} profiles pending tracking.\n"
-                    f"RAM Cache buffer uncommitted rows: {shared_stats['uncommitted_records']}/50\n"
+                    f"RAM Cache buffer uncommitted rows: {shared_stats['uncommitted_records']}/100\n"
                     f"Status: Ingesting verified friend network sequences...", language="bash"
                 )
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(1.0)
             
         st.session_state.harvester_running = False
         await asyncio.gather(*workers, return_exceptions=True)
@@ -430,12 +511,11 @@ with tab3:
     
     ignite_seed = st.button("🔥 Run Asynchronous Roblox Seed Swarm", use_container_width=True, type="primary")
     
-    # Core Seeding Scraper Logic
-    async def seed_worker(uid, proxy, session, log_box):
+    async def seed_worker(uid, proxy, session):
         g_cache = st.session_state.global_cache
         url = f"https://friends.roblox.com/v1/users/{uid}/friends"
         try:
-            async with session.get(url, proxy=proxy, timeout=7) as resp:
+            async with session.get(url, proxy=proxy, timeout=6) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     friends = [int(f["id"]) for f in data.get("data", []) if not f.get("isDeleted", False)]
@@ -446,15 +526,14 @@ with tab3:
         return 0
 
     async def run_hub_seeder(id_list, proxies):
-        status_box = st.empty()
         async with aiohttp.ClientSession() as session:
             tasks = []
             for i, uid in enumerate(id_list):
                 p = proxies[i % len(proxies)] if proxies else None
-                tasks.append(seed_worker(uid, p, session, status_box))
-            results = await asyncio.gather(*tasks)
+                tasks.append(seed_worker(uid, p, session))
+            await asyncio.gather(*tasks)
             save_persistent_cache(st.session_state.global_cache)
-            st.success(f"🎉 Backbone construction completed! Successfully populated real connection matrices for selected Roblox hubs.")
+            st.success(f"🎉 Backbone construction completed! Populated real connection matrices for selected Roblox hubs.")
 
     if ignite_seed:
         target_uids = [famous_hubs[name] for name in selected_hubs]
@@ -470,7 +549,7 @@ with tab3:
                 loop.run_until_complete(run_hub_seeder(target_uids, cleaned_proxies))
                 st.rerun()
 
-    # --- SYNTHETIC SEEDER BACKUP PANEL ---
+    # --- SYNTHETIC SEEDER PANEL ---
     st.markdown("---")
     st.subheader("📦 Fake Local Data Mock-Generator")
     seed_start = st.text_input("Simulate Start ID Entry:", value="1703896246")
