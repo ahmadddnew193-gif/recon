@@ -5,6 +5,8 @@ import json
 import os
 import time
 import random
+import pandas as pd
+import requests
 
 st.set_page_config(page_title="Recon Engine: Ultra Core", layout="wide")
 
@@ -443,7 +445,90 @@ with tab3:
         st.success("✅ Mock Database Seeded!")
         st.rerun()
 
-    # --- NEW FEATURE: DATABASE MAINTENANCE PANELS ---
+    # --- ENHANCED FEATURE: EXTERNAL DATABASE INGESTION GATEWAY ---
+    st.markdown("---")
+    st.subheader("📥 External Dataset Ingestion Pipeline")
+    st.write("Inject massive open-source graph dumps (CSV mappings or JSON lists) straight into the live tracer memory.")
+    
+    ingest_mode = st.radio("Choose Ingestion Sourcing Channel:", ["Local File Upload", "Direct URL Network Streamer"])
+    
+    raw_data_to_parse = None
+    data_format = None
+    
+    if ingest_mode == "Local File Upload":
+        uploaded_file = st.file_uploader("Select Target Dataset Dump (.json, .csv):", type=["json", "csv"])
+        if uploaded_file is not None:
+            raw_data_to_parse = uploaded_file
+            data_format = "json" if uploaded_file.name.endswith(".json") else "csv"
+    else:
+        dataset_url = st.text_input("Paste Public Dataset Direct Link URL (GitHub Raw, Open Buckets, etc):", 
+                                   placeholder="https://raw.githubusercontent.com/username/repo/main/data.csv")
+        if dataset_url.strip():
+            fetch_btn = st.button("🌐 Connect and Download Dataset Stream", use_container_width=True)
+            if fetch_btn:
+                with st.spinner("Streaming remote packets down to local processing buffer..."):
+                    try:
+                        res = requests.get(dataset_url, timeout=30)
+                        if res.status_code == 200:
+                            # Save temporarily to text stream buffer
+                            from io import BytesIO, StringIO
+                            if "json" in dataset_url.lower() or res.text.strip().startswith("{"):
+                                raw_data_to_parse = StringIO(res.text)
+                                data_format = "json"
+                            else:
+                                raw_data_to_parse = StringIO(res.text)
+                                data_format = "csv"
+                            st.success("📡 Download complete! Ready to merge.")
+                        else:
+                            st.error(f"❌ Server Error: Connection rejected with HTTP status code {res.status_code}")
+                    except Exception as e:
+                        st.error(f"❌ Network Stream Intercepted: {str(e)}")
+
+    if raw_data_to_parse is not None:
+        import_btn = st.button("🔥 Process and Merge External Graph Data", use_container_width=True, type="primary")
+        if import_btn:
+            g_cache = st.session_state.global_cache
+            added_records = 0
+            
+            try:
+                if data_format == "json":
+                    if hasattr(raw_data_to_parse, 'read'):
+                        raw_data_to_parse.seek(0)
+                    raw_data = json.load(raw_data_to_parse)
+                    for k, v in raw_data.items():
+                        if isinstance(v, list):
+                            g_cache[str(k)] = list(set([int(x) for x in v]))
+                            added_records += 1
+                            
+                elif data_format == "csv":
+                    if hasattr(raw_data_to_parse, 'seek'):
+                        raw_data_to_parse.seek(0)
+                    df = pd.read_csv(raw_data_to_parse)
+                    cols = list(df.columns)
+                    if len(cols) >= 2:
+                        u_col, f_col = cols[0], cols[1]
+                        st.info(f"Detected Link Matrix Layout: `{u_col}` ➔ `{f_col}`")
+                        
+                        grouped = df.groupby(u_col)[f_col].apply(list)
+                        for parent_id, friends_list in grouped.items():
+                            try:
+                                str_p = str(int(parent_id))
+                                int_friends = list(set([int(x) for x in friends_list if pd.notna(x)]))
+                                if str_p in g_cache:
+                                    g_cache[str_p] = list(set(g_cache[str_p] + int_friends))
+                                else:
+                                    g_cache[str_p] = int_friends
+                                added_records += 1
+                            except ValueError:
+                                continue # Skip header corruptions or string nodes safely
+                
+                save_persistent_cache(g_cache)
+                st.success(f"🎉 Engine Optimization Successful! Merged {added_records} distinct profile maps into memory cache.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ Structural Ingestion Failure: {str(e)}. Formatting arrangement mismatch details.")
+
+    # --- DATABASE MAINTENANCE PANELS ---
     st.markdown("---")
     st.subheader("🧹 Database Maintenance & Purge Utilities")
     st.write("Safely erase structural entries from your system to toggle cleanly between synthetic testing and actual tracking jobs.")
@@ -456,10 +541,8 @@ with tab3:
         if wipe_all_btn:
             st.session_state.global_cache = {}
             if os.path.exists(CACHE_FILE):
-                try:
-                    os.remove(CACHE_FILE)
-                except Exception:
-                    pass
+                try: os.remove(CACHE_FILE)
+                except Exception: pass
             st.success("💥 Database dropped! Reset to 0 records.")
             st.rerun()
             
@@ -470,21 +553,16 @@ with tab3:
             g_cache = st.session_state.global_cache
             mock_hubs = ["999101", "999102", "999103"]
             nodes_altered = 0
-            
-            # Remove direct keys
             for h_id in mock_hubs:
                 if h_id in g_cache:
                     del g_cache[h_id]
                     nodes_altered += 1
-                    
-            # Remove references inside existing lists
             for key in list(g_cache.keys()):
                 orig_list = g_cache[key]
                 cleaned_list = [x for x in orig_list if str(x) not in mock_hubs]
                 if len(cleaned_list) != len(orig_list):
                     g_cache[key] = cleaned_list
                     nodes_altered += 1
-                    
             save_persistent_cache(g_cache)
             st.success(f"✅ Scrubbed reference matrices! Removed {nodes_altered} link dependencies.")
             st.rerun()
