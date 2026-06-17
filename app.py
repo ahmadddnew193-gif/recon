@@ -7,14 +7,13 @@ import time
 import random
 from collections import deque
 
-st.set_page_config(page_title="Recon Engine: Game-Scale Core", layout="wide")
+st.set_page_config(page_title="Recon Engine: Free Swarm", layout="wide")
 
-st.title("⚡ OSINT Graph Reconnaissance (Database Cache Core)")
-st.write("Emulates Roblox game infrastructure by utilizing an optimized local graph cache layer.")
+st.title("⚡ OSINT Graph Reconnaissance ($0 Budget Core)")
+st.write("Automated live public proxy harvesting with fast-dropping async rotation.")
 
 CACHE_FILE = "roblox_graph_map.json"
 
-# --- Graph Database Storage Layer ---
 @st.cache_resource
 def load_persistent_cache():
     if os.path.exists(CACHE_FILE):
@@ -29,10 +28,9 @@ def save_persistent_cache(cache_data):
     try:
         with open(CACHE_FILE, "w") as f:
             json.dump(cache_data, f)
-    except Exception as e:
-        print(f"Cache write error: {e}")
+    except Exception:
+        pass
 
-# Load the local graph database
 if "global_cache" not in st.session_state:
     st.session_state.global_cache = load_persistent_cache()
 if "logs" not in st.session_state:
@@ -45,21 +43,15 @@ col1, col2 = st.columns([1, 2])
 
 with col1:
     st.subheader("Target Parameters")
-    s_input = st.text_input("Start ID:", "1703896246")
-    t_input = st.text_input("Target ID:", "140671171")
-    batch_size = st.slider("Network Workers (Concurrent Streams):", 10, 100, 40)
+    s_input = st.text_input("Start ID (You):", "1703896246")
+    t_input = st.text_input("Target ID (Celebrity):", "140671171")
+    batch_size = st.slider("Proxy Concurrency (Parallel Workers):", 10, 60, 30)
     
-    st.subheader("🌐 Proxy Routing Panel")
-    proxy_input = st.text_area(
-        "Paste Proxies (One per line):",
-        placeholder="http://user:pass@ip:port",
-        height=100
-    )
+    st.subheader("📊 Engine Statistics")
+    st.metric("Cached Profiles in Local DB:", len(st.session_state.global_cache))
     
-    start_btn = st.button("🚀 Execute Swarm Search", use_container_width=True, type="primary")
+    start_btn = st.button("🚀 Harvest Proxies & Run Search", use_container_width=True, type="primary")
     stop_btn = st.button("🛑 Stop Engine", use_container_width=True)
-    
-    st.metric("Locally Indexed Database Profiles", len(st.session_state.global_cache))
 
 with col2:
     st.subheader("Live Graph Processing Engine")
@@ -70,29 +62,57 @@ if stop_btn:
     st.session_state.running = False
     st.rerun()
 
+# --- Automated Free Proxy Harvester ---
+async def harvest_free_proxies(session):
+    """Scrapes raw open-source repositories for active public proxies"""
+    urls = [
+        "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
+        "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt"
+    ]
+    harvested = []
+    for url in urls:
+        try:
+            async with session.get(url, timeout=5) as response:
+                if response.status == 200:
+                    text = await response.text()
+                    for line in text.splitlines():
+                        line = line.strip()
+                        if line and ":" in line:
+                            # Standardize into proxy format
+                            harvested.append(f"http://{line}")
+        except Exception:
+            continue
+    return list(set(harvested)) # Remove duplicates
+
 # --- Hyper-Async Network Handlers ---
 async def fetch_friends_async(session, user_id, proxy_list):
     url = f"https://friends.roblox.com/v1/users/{user_id}/friends"
-    selected_proxy = random.choice(proxy_list) if proxy_list else None
+    
+    if not proxy_list:
+        return user_id, [], "NO_PROXIES"
+        
+    proxy = random.choice(proxy_list)
     try:
-        async with session.get(url, proxy=selected_proxy, timeout=5) as response:
+        # Aggressive 2-second timeout to quickly skip dead/slow free proxies
+        async with session.get(url, proxy=proxy, timeout=2) as response:
             if response.status == 200:
                 data = await response.json()
                 friends = [f["id"] for f in data.get("data", []) if not f.get("isDeleted", False)]
-                return user_id, friends, False
+                return user_id, friends, None
             elif response.status == 429:
-                return user_id, [], True
-            return user_id, [], False
+                return user_id, [], "429"
+            return user_id, [], "BAD_STATUS"
     except Exception:
-        return user_id, [], True
+        # If the free proxy times out or drops the connection, flag it to burn it
+        return user_id, [], proxy
 
 async def resolve_usernames_async(session, id_list, proxy_list):
     if not id_list:
         return {}
     url = "https://users.roblox.com/v1/users"
-    selected_proxy = random.choice(proxy_list) if proxy_list else None
+    proxy = random.choice(proxy_list) if proxy_list else None
     try:
-        async with session.post(url, json={"userIds": id_list, "excludeBannedUsers": False}, proxy=selected_proxy, timeout=5) as response:
+        async with session.post(url, json={"userIds": id_list, "excludeBannedUsers": False}, proxy=proxy, timeout=4) as response:
             if response.status == 200:
                 data = await response.json()
                 return {u["id"]: u["name"] for u in data.get("data", [])}
@@ -100,8 +120,8 @@ async def resolve_usernames_async(session, id_list, proxy_list):
     except Exception:
         return {}
 
-# --- Execution Engine ---
-async def run_engine(s_id, t_id, max_concurrent, proxy_pool):
+# --- Execution Core ---
+async def run_engine(s_id, t_id, max_concurrent):
     start_visited = {s_id: [s_id]}
     start_queue = deque([s_id])
     
@@ -110,29 +130,33 @@ async def run_engine(s_id, t_id, max_concurrent, proxy_pool):
     
     api_calls = 0
     cache_hits = 0
+    burned_proxies = 0
     path_found = False
     final_chain = []
     new_discoveries = {}
 
     def log(msg):
         st.session_state.logs.append(msg)
-        if len(st.session_state.logs) > 40:
+        if len(st.session_state.logs) > 35:
             st.session_state.logs.pop(0)
         console_placeholder.code("\n".join(st.session_state.logs), language="bash")
 
-    log("[START] Mapping network mesh layers...")
-
     async with aiohttp.ClientSession() as session:
+        log("[SYSTEM] Connecting to open-source proxy databases...")
+        proxy_pool = await harvest_free_proxies(session)
+        log(f"[SUCCESS] Injected {len(proxy_pool)} live free proxies into memory swarm.")
+
+        if not proxy_pool:
+            log("[CRITICAL] Failed to harvest free proxies. Aborting run.")
+            return
+
         while st.session_state.running:
             
-            # --- PHASE 1: PROCESS FROM LOCAL CACHE INSTANTLY ---
-            # Crawl through the queues and instantly resolve anything we already know
+            # --- PHASE 1: INSTANT CACHE EVALUATION ---
             pre_processed = False
-            
             for queue, visited, direction in [(start_queue, start_visited, "FORWARD"), (target_queue, target_visited, "REVERSE")]:
                 if queue:
                     next_node = queue[0]
-                    # Direct check against string and integer formats in the JSON map
                     str_node = str(next_node)
                     if str_node in st.session_state.global_cache:
                         queue.popleft()
@@ -166,14 +190,10 @@ async def run_engine(s_id, t_id, max_concurrent, proxy_pool):
             
             if path_found:
                 break
-                
-            # If we were able to pull data instantly from the local database, loop immediately without wasting network time
             if pre_processed:
-                if cache_hits % 100 == 0:
-                    status_placeholder.success(f"⚡ Local Database Cache Hits: {cache_hits} | No API throttling applied.")
                 continue
 
-            # --- PHASE 2: PARALLEL WEB SCROLL SWARM ---
+            # --- PHASE 2: ASYNC SWARM DISPATCH ---
             tasks = []
             directions = []
             
@@ -192,27 +212,32 @@ async def run_engine(s_id, t_id, max_concurrent, proxy_pool):
                     break
             
             if not tasks:
-                log("[INFO] Search field terminated. No structural relationship discovered.")
+                log("[INFO] Tree branches completed. No intersecting relationship found.")
                 break
 
-            log(f"[NETWORK] Querying {len(tasks)} live profiles simultaneously...")
             results = await asyncio.gather(*tasks)
             api_calls += len(tasks)
             
-            status_placeholder.info(f"API Calls: {api_calls} | Database Hits: {cache_hits} | Total Visited Nodes: {len(start_visited) + len(target_visited)}")
-            
-            rate_limit_tripped = False
+            status_placeholder.info(
+                f"Active Proxies: {len(proxy_pool)} | Dead Proxies Removed: {burned_proxies} | "
+                f"Cache Hits: {cache_hits} | API Calls: {api_calls}"
+            )
 
-            for (direction, parent_node), (node_id, friends, hit_429) in zip(directions, results):
-                if hit_429:
-                    rate_limit_tripped = True
+            for (direction, parent_node), (node_id, friends, error_flag) in zip(directions, results):
+                if error_flag:
+                    # If it's an explicit proxy URL that failed/timed out, remove it from our pool permanently
+                    if error_flag.startswith("http") and error_flag in proxy_pool:
+                        proxy_pool.remove(error_flag)
+                        burned_proxies += 1
+                    
+                    # Return node back to its queue for a retry with a different proxy
                     if direction == "FORWARD":
                         start_queue.appendleft(parent_node)
                     else:
                         target_queue.appendleft(parent_node)
                     continue
                 
-                # Commit new discovery straight to memory database
+                # Cache successful lookups so we never hit the web for them again
                 st.session_state.global_cache[str(node_id)] = friends
                 new_discoveries[str(node_id)] = friends
                 
@@ -235,22 +260,15 @@ async def run_engine(s_id, t_id, max_concurrent, proxy_pool):
                         if friend not in target_visited:
                             target_visited[friend] = current_path + [friend]
                             target_queue.append(friend)
-                
                 if path_found:
                     break
             
             if path_found:
                 break
                 
-            if rate_limit_tripped and not proxy_pool:
-                log("[WARNING] Throttled. Swarm paused for 60s. Add proxies to eliminate this lag.")
-                for i in range(60, 0, -1):
-                    await asyncio.sleep(1)
-                continue
-
+            # Keep a tiny delay to allow Streamlit UI loops to render stably
             await asyncio.sleep(0.01)
 
-        # Sync memory modifications out to disk layout
         if new_discoveries:
             save_persistent_cache(st.session_state.global_cache)
 
@@ -260,7 +278,7 @@ async def run_engine(s_id, t_id, max_concurrent, proxy_pool):
                 if not clean_chain or clean_chain[-1] != u:
                     clean_chain.append(u)
                     
-            log("[SUCCESS] Path intercepted! Resolving profile handles...")
+            log("[SUCCESS] Path link verified! Reconstructing display names...")
             names = await resolve_usernames_async(session, clean_chain, proxy_pool)
             display = [names.get(uid, f"UID:{uid}") for uid in clean_chain]
             
@@ -268,14 +286,11 @@ async def run_engine(s_id, t_id, max_concurrent, proxy_pool):
             st.info(" ➔ ".join(f"**{n}**" for n in display))
             st.session_state.running = False
 
-# --- Entry Point Run ---
+# --- Trigger ---
 if start_btn and s_input.isdigit() and t_input.isdigit():
     st.session_state.running = True
-    st.session_state.logs = ["[SYSTEM] Starting Core Database Engine..."]
-    
-    raw_lines = proxy_input.split("\n")
-    cleaned_proxies = [line.strip() for line in raw_lines if line.strip().startswith("http")]
+    st.session_state.logs = ["[SYSTEM] Launching Automated Budget Swarm Core..."]
     
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    loop.run_until_complete(run_engine(int(s_input), int(t_input), batch_size, cleaned_proxies))
+    loop.run_until_complete(run_engine(int(s_input), int(t_input), batch_size))
