@@ -6,14 +6,14 @@ import os
 import time
 import random
 
-st.set_page_config(page_title="Recon Engine: Hyper-Speed Core", layout="wide")
+st.set_page_config(page_title="Recon Engine: Split-Queue Core", layout="wide")
 
-st.title("⚡ OSINT Graph Reconnaissance (Dedicated Pipeline Core)")
-st.write("Utilizes a high-throughput multi-worker queue bound to private authenticated proxies.")
+st.title("⚡ OSINT Graph Reconnaissance (Split-Queue Engine)")
+st.write("Hyper-optimized dual-queue pipeline splitting local database tracking from proxy paths.")
 
 CACHE_FILE = "roblox_graph_map.json"
 
-# Default pre-loaded Webshare proxy pool from configuration credentials
+# Pre-loaded verified Webshare proxy configuration
 DEFAULT_PROXIES = """38.154.203.95:5863:zwgfezql:u1o2humd1hr8
 198.105.121.200:6462:zwgfezql:u1o2humd1hr8
 64.137.96.74:6641:zwgfezql:u1o2humd1hr8
@@ -63,7 +63,7 @@ def parse_proxy_input(raw_text):
             cleaned.append(f"http://{parts[2]}:{parts[3]}@{parts[0]}:{parts[1]}")
     return cleaned
 
-# --- UI Sidebar ---
+# --- Streamlit UI Setup ---
 col1, col2 = st.columns([1, 2])
 
 with col1:
@@ -71,14 +71,10 @@ with col1:
     s_input = st.text_input("Start ID:", "1703896246")
     t_input = st.text_input("Target ID:", "140671171")
     
-    st.subheader("🌐 Proxy Routing Array")
-    proxy_input = st.text_area(
-        "Webshare Authenticated Gateway List:",
-        value=DEFAULT_PROXIES,
-        height=220
-    )
+    st.subheader("🌐 Authenticated Gateways")
+    proxy_input = st.text_area("Webshare Routing Array Lines:", value=DEFAULT_PROXIES, height=220)
     
-    start_btn = st.button("🚀 Ignite Pipeline Swarm", use_container_width=True, type="primary")
+    start_btn = st.button("🚀 Ignite Split Swarm", use_container_width=True, type="primary")
     stop_btn = st.button("🛑 Kill Pipeline Tasks", use_container_width=True)
     
     st.metric("Profiles Currently Cached in DB", len(st.session_state.global_cache))
@@ -92,85 +88,83 @@ if stop_btn:
     st.session_state.running = False
     st.rerun()
 
-# --- Dedicated Worker Interface ---
-async def proxy_worker_task(worker_id, proxy, start_queue, target_queue, start_visited, target_visited, session, path_found_event, results_container, log_func):
-    """An isolated loop bound exclusively to one proxy, maintaining continuous execution flow."""
-    cooldowns = 0
+# --- Worker 1: Ultra-Fast Local Cache Sweeper ---
+async def cache_processor_task(network_queue, cache_queue, start_visited, target_visited, path_found_event, results_container):
+    """Processes known nodes at machine speed using local database memory without consuming network bandwidth."""
     while not path_found_event.is_set() and st.session_state.running:
         try:
-            # Balance the search tree by choosing to pull from the smaller queue
-            if len(start_visited) <= len(target_visited):
-                if not start_queue.empty():
-                    node = start_queue.get_nowait()
-                    direction = "FORWARD"
-                elif not target_queue.empty():
-                    node = target_queue.get_nowait()
-                    direction = "REVERSE"
-                else:
-                    await asyncio.sleep(0.05)
-                    continue
+            direction, node = cache_queue.get_nowait()
+        except asyncio.QueueEmpty:
+            await asyncio.sleep(0.02)
+            continue
+            
+        str_node = str(node)
+        friends = st.session_state.global_cache.get(str_node, [])
+        results_container["cache_hits"] += 1
+        
+        current_path = start_visited.get(node) if direction == "FORWARD" else target_visited.get(node)
+        if not current_path or len(current_path) >= 5:
+            continue
+            
+        for friend in friends:
+            if direction == "FORWARD":
+                if friend in target_visited:
+                    results_container["final_chain"] = current_path + target_visited[friend][::-1]
+                    path_found_event.set()
+                    break
+                if friend not in start_visited:
+                    start_visited[friend] = current_path + [friend]
+                    if str(friend) in st.session_state.global_cache:
+                        await cache_queue.put(("FORWARD", friend))
+                    else:
+                        await network_queue.put(("FORWARD", friend))
             else:
-                if not target_queue.empty():
-                    node = target_queue.get_nowait()
-                    direction = "REVERSE"
-                elif not start_queue.empty():
-                    node = start_queue.get_nowait()
-                    direction = "FORWARD"
-                else:
-                    await asyncio.sleep(0.05)
-                    continue
+                if friend in start_visited:
+                    results_container["final_chain"] = start_visited[friend] + current_path[::-1]
+                    path_found_event.set()
+                    break
+                if friend not in target_visited:
+                    target_visited[friend] = current_path + [friend]
+                    if str(friend) in st.session_state.global_cache:
+                        await cache_queue.put(("REVERSE", friend))
+                    else:
+                        await network_queue.put(("REVERSE", friend))
+
+# --- Worker 2: Smart Adaptive Proxy Network Channels ---
+async def proxy_worker_task(worker_id, proxy, network_queue, cache_queue, start_visited, target_visited, session, path_found_event, results_container, log_func):
+    """Paces requests cleanly to avoid detection limits. Dynamically steps back if firewalls challenge the IP."""
+    base_delay = 1.4  # Optimal safe interval for datacenter proxy ranges
+    
+    while not path_found_event.is_set() and st.session_state.running:
+        try:
+            direction, node = network_queue.get_nowait()
         except asyncio.QueueEmpty:
             await asyncio.sleep(0.05)
             continue
-
-        # Step 1: Instantly bypass network lookups if data exists inside the Local DB
+            
         str_node = str(node)
         if str_node in st.session_state.global_cache:
-            friends = st.session_state.global_cache[str_node]
             results_container["cache_hits"] += 1
-            
-            # Fast check intersection path
-            current_path = start_visited[node] if direction == "FORWARD" else target_visited[node]
-            if len(current_path) >= 5:
-                continue
-                
-            for friend in friends:
-                if direction == "FORWARD":
-                    if friend in target_visited:
-                        results_container["final_chain"] = current_path + target_visited[friend][::-1]
-                        path_found_event.set()
-                        break
-                    if friend not in start_visited:
-                        start_visited[friend] = current_path + [friend]
-                        await start_queue.put(friend)
-                else:
-                    if friend in start_visited:
-                        results_container["final_chain"] = start_visited[friend] + current_path[::-1]
-                        path_found_event.set()
-                        break
-                    if friend not in target_visited:
-                        target_visited[friend] = current_path + [friend]
-                        await target_queue.put(friend)
+            await cache_queue.put((direction, node))
             continue
-
-        # Step 2: Outbound network request pipeline via the dedicated proxy
+            
+        current_path = start_visited.get(node) if direction == "FORWARD" else target_visited.get(node)
+        if not current_path or len(current_path) >= 5:
+            continue
+            
         url = f"https://friends.roblox.com/v1/users/{node}/friends"
+        
         try:
-            async with session.get(url, proxy=proxy, timeout=5) as response:
+            async with session.get(url, proxy=proxy, timeout=6) as response:
                 results_container["api_calls"] += 1
                 
                 if response.status == 200:
                     data = await response.json()
                     friends = [f["id"] for f in data.get("data", []) if not f.get("isDeleted", False)]
                     
-                    # Update Memory DB
                     st.session_state.global_cache[str_node] = friends
                     results_container["new_discoveries"][str_node] = friends
                     
-                    current_path = start_visited[node] if direction == "FORWARD" else target_visited[node]
-                    if len(current_path) >= 5:
-                        continue
-                        
                     for friend in friends:
                         if direction == "FORWARD":
                             if friend in target_visited:
@@ -179,7 +173,10 @@ async def proxy_worker_task(worker_id, proxy, start_queue, target_queue, start_v
                                 break
                             if friend not in start_visited:
                                 start_visited[friend] = current_path + [friend]
-                                await start_queue.put(friend)
+                                if str(friend) in st.session_state.global_cache:
+                                    await cache_queue.put(("FORWARD", friend))
+                                else:
+                                    await network_queue.put(("FORWARD", friend))
                         else:
                             if friend in start_visited:
                                 results_container["final_chain"] = start_visited[friend] + current_path[::-1]
@@ -187,33 +184,26 @@ async def proxy_worker_task(worker_id, proxy, start_queue, target_queue, start_v
                                 break
                             if friend not in target_visited:
                                 target_visited[friend] = current_path + [friend]
-                                await target_queue.put(friend)
-                                
-                    # Maintain steady throughput pacing to prevent rate limiting
-                    await asyncio.sleep(0.25)
+                                if str(friend) in st.session_state.global_cache:
+                                    await cache_queue.put(("REVERSE", friend))
+                                else:
+                                    await network_queue.put(("REVERSE", friend))
+                                    
+                    # Drift delay back down slightly over stable connections
+                    base_delay = max(base_delay - 0.05, 1.2)
+                    await asyncio.sleep(base_delay)
                     
                 elif response.status == 429:
-                    # Put node back in the queue line for another worker to try
-                    if direction == "FORWARD":
-                        await start_queue.put(node)
-                    else:
-                        await target_queue.put(node)
-                    
-                    cooldowns += 1
-                    log_func(f"[Worker-{worker_id}] 429 Throttled. Isolating proxy pathway for 6 seconds...")
-                    await asyncio.sleep(6.0)
+                    await network_queue.put((direction, node))
+                    log_func(f"[Worker-{worker_id}] ⚠️ Throttled. Pacing adjusted to {base_delay+0.5}s. Cooling pathway down...")
+                    base_delay = min(base_delay + 0.5, 3.5)
+                    await asyncio.sleep(12.0)  # Safe lockout recovery window
                 else:
-                    if direction == "FORWARD":
-                        await start_queue.put(node)
-                    else:
-                        await target_queue.put(node)
                     await asyncio.sleep(1.0)
+                    
         except Exception:
-            if direction == "FORWARD":
-                await start_queue.put(node)
-            else:
-                await target_queue.put(node)
-            await asyncio.sleep(1.0)
+            await network_queue.put((direction, node))
+            await asyncio.sleep(1.5)
 
 async def resolve_usernames_async(session, id_list, proxy_list):
     if not id_list:
@@ -229,19 +219,26 @@ async def resolve_usernames_async(session, id_list, proxy_list):
     except Exception:
         return {}
 
-# --- Control Core Assembly ---
+# --- Engine Master Orchestration Loop ---
 async def master_pipeline_engine(s_id, t_id, proxies):
-    start_queue = asyncio.Queue()
-    target_queue = asyncio.Queue()
-    
-    await start_queue.put(s_id)
-    await target_queue.put(t_id)
+    network_queue = asyncio.Queue()
+    cache_queue = asyncio.Queue()
     
     start_visited = {s_id: [s_id]}
     target_visited = {t_id: [t_id]}
     
+    # Pre-sort targets into respective processing queues
+    if str(s_id) in st.session_state.global_cache:
+        await cache_queue.put(("FORWARD", s_id))
+    else:
+        await network_queue.put(("FORWARD", s_id))
+        
+    if str(t_id) in st.session_state.global_cache:
+        await cache_queue.put(("REVERSE", t_id))
+    else:
+        await network_queue.put(("REVERSE", t_id))
+        
     path_found_event = asyncio.Event()
-    
     results_container = {
         "final_chain": [],
         "api_calls": 0,
@@ -251,37 +248,31 @@ async def master_pipeline_engine(s_id, t_id, proxies):
 
     def log(msg):
         st.session_state.logs.append(msg)
-        if len(st.session_state.logs) > 30:
+        if len(st.session_state.logs) > 25:
             st.session_state.logs.pop(0)
         console_placeholder.code("\n".join(st.session_state.logs), language="bash")
 
-    log(f"[SYSTEM] Spinning up {len(proxies)} dedicated asynchronous pipeline streams...")
+    log("[SYSTEM] Spinning up coordinated dual-queue optimization architecture...")
 
     async with aiohttp.ClientSession() as session:
-        # Initialize one persistent background task wrapper per proxy route
         workers = []
+        
+        # Fire up the hyper-speed local cache analyzer
+        workers.append(asyncio.create_task(cache_processor_task(network_queue, cache_queue, start_visited, target_visited, path_found_event, results_container)))
+        
+        # Deploy network channels bound directly to dedicated proxy IPs
         for idx, proxy_url in enumerate(proxies):
-            workers.append(
-                asyncio.create_task(
-                    proxy_worker_task(
-                        idx + 1, proxy_url, start_queue, target_queue,
-                        start_visited, target_visited, session,
-                        path_found_event, results_container, log
-                    )
-                )
-            )
+            workers.append(asyncio.create_task(proxy_worker_task(idx + 1, proxy_url, network_queue, cache_queue, start_visited, target_visited, session, path_found_event, results_container, log)))
 
-        # Keep UI informed as workers crunch background queues asynchronously
         while not path_found_event.is_set() and st.session_state.running:
             status_placeholder.info(
-                f"🚀 Active Network Channels: {len(proxies)} | "
-                f"Local Database Cache Hits: {results_container['cache_hits']} | "
-                f"Outbound API Calls Traversed: {results_container['api_calls']} | "
-                f"Discovered Profiles: {len(start_visited) + len(target_visited)}"
+                f"📡 Channels Live: {len(proxies)} | "
+                f"⚡ Memory Cache Hits: {results_container['cache_hits']} | "
+                f"🌐 Outbound API Calls: {results_container['api_calls']} | "
+                f"📂 Network Queue Backlog: {network_queue.qsize()}"
             )
-            await asyncio.sleep(0.4)
+            await asyncio.sleep(0.5)
 
-        # Signal completion state to remaining threads
         path_found_event.set()
         await asyncio.gather(*workers, return_exceptions=True)
 
@@ -294,7 +285,7 @@ async def master_pipeline_engine(s_id, t_id, proxies):
                 if not clean_chain or clean_chain[-1] != u:
                     clean_chain.append(u)
                     
-            log("[SUCCESS] Match link discovered! Reconstructing identity handles...")
+            log("[SUCCESS] Path trace complete! Parsing target names...")
             names = await resolve_usernames_async(session, clean_chain, proxies)
             display = [names.get(uid, f"UID:{uid}") for uid in clean_chain]
             
@@ -302,15 +293,15 @@ async def master_pipeline_engine(s_id, t_id, proxies):
             st.info(" ➔ ".join(f"**{n}**" for n in display))
             st.session_state.running = False
 
-# --- Trigger Router ---
+# --- UI Trigger Routers ---
 if start_btn and s_input.isdigit() and t_input.isdigit():
     cleaned_proxies = parse_proxy_input(proxy_input)
     
     if not cleaned_proxies:
-        st.error("❌ Critical: Proxy formatting verification failed. Verify configuration data input.")
+        st.error("❌ Configuration Failure: Unable to clean data structures.")
     else:
         st.session_state.running = True
-        st.session_state.logs = ["[SYSTEM] Synchronizing dedicated pipeline cores... Wait for tracking channels to ignite."]
+        st.session_state.logs = ["[SYSTEM] Synchronizing tracking matrices... Threads operational."]
         
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
