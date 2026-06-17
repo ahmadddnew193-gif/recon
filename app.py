@@ -6,7 +6,6 @@ import os
 import time
 import random
 import pandas as pd
-import requests
 
 st.set_page_config(page_title="Recon Engine: Ultra Core", layout="wide")
 
@@ -70,10 +69,10 @@ with st.sidebar:
     st.header("⚙️ Global Control Array")
     proxy_input = st.text_area("🌐 Webshare Proxy Gateways:", value=DEFAULT_PROXIES, height=220)
     st.markdown("---")
-    st.metric("Database Profiles Loaded In-Memory", len(st.session_state.global_cache))
+    st.metric("Roblox Profiles In Local DB", len(st.session_state.global_cache))
 
 # --- Navigation Setup via Layout Tabs ---
-tab1, tab2, tab3 = st.tabs(["🚀 Graph Path Tracer", "🌍 Real Mass Harvester", "📦 Synthetic Seeder & Tools"])
+tab1, tab2, tab3 = st.tabs(["🚀 Graph Path Tracer", "🌍 Real Mass Harvester", "📦 Roblox Backbone Seeder & Tools"])
 
 # ==========================================
 # TAB 1: GRAPH PATHFINDER CORE (REAL SCANS)
@@ -295,7 +294,7 @@ if start_btn and s_input.isdigit() and t_input.isdigit():
         loop.run_until_complete(master_pipeline_engine(int(s_input), int(t_input), cleaned_proxies))
 
 # ==========================================
-# TAB 2: 10x FASTER REAL CRAWLER HARVESTER
+# TAB 2: REAL ROBLOX CRAWLER HARVESTER
 # ==========================================
 with tab2:
     st.subheader("🌍 Continuous Real-World Social Graph Harvester")
@@ -335,7 +334,7 @@ async def harvester_spider_worker(worker_id, proxy, harvest_queue, shared_stats,
         str_user = str(user_id)
         if str_user in g_cache:
             for friend in g_cache[str_user]:
-                if len(g_cache) < 200000:
+                if len(g_cache) < 500000:
                     harvest_queue.put_nowait(friend)
             continue
             
@@ -410,10 +409,70 @@ if start_harvest_btn and seed_id_input.isdigit():
         st.rerun()
 
 # ==========================================
-# TAB 3: SYNTHETIC SEEDER & MANAGEMENT UTILITIES
+# TAB 3: ROBLOX BACKBONE SEEDER & MANAGEMENT
 # ==========================================
 with tab3:
-    st.subheader("📦 Fake Database Generator")
+    st.subheader("📥 Live Roblox Backbone Hub Pre-Seeder")
+    st.write("Build a real-world Roblox dataset inside your cache instantly. Select high-density infrastructure hubs (Admins, Devs, Traders) to fetch their active live friend circles.")
+    
+    famous_hubs = {
+        "Builderman (UID: 1)": 1,
+        "Roblox Official (UID: 18)": 18,
+        "Shedletsky / Telamon (UID: 261)": 261,
+        "Asimo3089 - Jailbreak Creator (UID: 12551)": 12551,
+        "Linkmon99 - Top Trader (UID: 472911)": 472911,
+        "Merely - Limiteds Collector (UID: 2032622)": 2032622,
+        "Badcc - Scripting Legend (UID: 1981245)": 1981245
+    }
+    
+    selected_hubs = st.multiselect("Select Core Roblox Hubs to Map:", list(famous_hubs.keys()), default=list(famous_hubs.keys()))
+    custom_seed_list = st.text_input("Append Extra Custom Roblox Hub UIDs (Comma-separated):", placeholder="e.g. 1703896246, 140671171")
+    
+    ignite_seed = st.button("🔥 Run Asynchronous Roblox Seed Swarm", use_container_width=True, type="primary")
+    
+    # Core Seeding Scraper Logic
+    async def seed_worker(uid, proxy, session, log_box):
+        g_cache = st.session_state.global_cache
+        url = f"https://friends.roblox.com/v1/users/{uid}/friends"
+        try:
+            async with session.get(url, proxy=proxy, timeout=7) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    friends = [int(f["id"]) for f in data.get("data", []) if not f.get("isDeleted", False)]
+                    g_cache[str(uid)] = friends
+                    return len(friends)
+        except Exception:
+            pass
+        return 0
+
+    async def run_hub_seeder(id_list, proxies):
+        status_box = st.empty()
+        async with aiohttp.ClientSession() as session:
+            tasks = []
+            for i, uid in enumerate(id_list):
+                p = proxies[i % len(proxies)] if proxies else None
+                tasks.append(seed_worker(uid, p, session, status_box))
+            results = await asyncio.gather(*tasks)
+            save_persistent_cache(st.session_state.global_cache)
+            st.success(f"🎉 Backbone construction completed! Successfully populated real connection matrices for selected Roblox hubs.")
+
+    if ignite_seed:
+        target_uids = [famous_hubs[name] for name in selected_hubs]
+        if custom_seed_list.strip():
+            for c_id in custom_seed_list.split(","):
+                if c_id.strip().isdigit(): target_uids.append(int(c_id.strip()))
+                
+        cleaned_proxies = parse_proxy_input(proxy_input)
+        if target_uids and cleaned_proxies:
+            with st.spinner("Swarming Roblox servers to assemble real-world native backbone..."):
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(run_hub_seeder(target_uids, cleaned_proxies))
+                st.rerun()
+
+    # --- SYNTHETIC SEEDER BACKUP PANEL ---
+    st.markdown("---")
+    st.subheader("📦 Fake Local Data Mock-Generator")
     seed_start = st.text_input("Simulate Start ID Entry:", value="1703896246")
     seed_target = st.text_input("Simulate Target ID Entry:", value="140671171")
     profile_volume = st.number_input("Background Density Nodes:", min_value=100, max_value=50000, value=5000, step=500)
@@ -444,89 +503,6 @@ with tab3:
         save_persistent_cache(database)
         st.success("✅ Mock Database Seeded!")
         st.rerun()
-
-    # --- ENHANCED FEATURE: EXTERNAL DATABASE INGESTION GATEWAY ---
-    st.markdown("---")
-    st.subheader("📥 External Dataset Ingestion Pipeline")
-    st.write("Inject massive open-source graph dumps (CSV mappings or JSON lists) straight into the live tracer memory.")
-    
-    ingest_mode = st.radio("Choose Ingestion Sourcing Channel:", ["Local File Upload", "Direct URL Network Streamer"])
-    
-    raw_data_to_parse = None
-    data_format = None
-    
-    if ingest_mode == "Local File Upload":
-        uploaded_file = st.file_uploader("Select Target Dataset Dump (.json, .csv):", type=["json", "csv"])
-        if uploaded_file is not None:
-            raw_data_to_parse = uploaded_file
-            data_format = "json" if uploaded_file.name.endswith(".json") else "csv"
-    else:
-        dataset_url = st.text_input("Paste Public Dataset Direct Link URL (GitHub Raw, Open Buckets, etc):", 
-                                   placeholder="https://raw.githubusercontent.com/username/repo/main/data.csv")
-        if dataset_url.strip():
-            fetch_btn = st.button("🌐 Connect and Download Dataset Stream", use_container_width=True)
-            if fetch_btn:
-                with st.spinner("Streaming remote packets down to local processing buffer..."):
-                    try:
-                        res = requests.get(dataset_url, timeout=30)
-                        if res.status_code == 200:
-                            # Save temporarily to text stream buffer
-                            from io import BytesIO, StringIO
-                            if "json" in dataset_url.lower() or res.text.strip().startswith("{"):
-                                raw_data_to_parse = StringIO(res.text)
-                                data_format = "json"
-                            else:
-                                raw_data_to_parse = StringIO(res.text)
-                                data_format = "csv"
-                            st.success("📡 Download complete! Ready to merge.")
-                        else:
-                            st.error(f"❌ Server Error: Connection rejected with HTTP status code {res.status_code}")
-                    except Exception as e:
-                        st.error(f"❌ Network Stream Intercepted: {str(e)}")
-
-    if raw_data_to_parse is not None:
-        import_btn = st.button("🔥 Process and Merge External Graph Data", use_container_width=True, type="primary")
-        if import_btn:
-            g_cache = st.session_state.global_cache
-            added_records = 0
-            
-            try:
-                if data_format == "json":
-                    if hasattr(raw_data_to_parse, 'read'):
-                        raw_data_to_parse.seek(0)
-                    raw_data = json.load(raw_data_to_parse)
-                    for k, v in raw_data.items():
-                        if isinstance(v, list):
-                            g_cache[str(k)] = list(set([int(x) for x in v]))
-                            added_records += 1
-                            
-                elif data_format == "csv":
-                    if hasattr(raw_data_to_parse, 'seek'):
-                        raw_data_to_parse.seek(0)
-                    df = pd.read_csv(raw_data_to_parse)
-                    cols = list(df.columns)
-                    if len(cols) >= 2:
-                        u_col, f_col = cols[0], cols[1]
-                        st.info(f"Detected Link Matrix Layout: `{u_col}` ➔ `{f_col}`")
-                        
-                        grouped = df.groupby(u_col)[f_col].apply(list)
-                        for parent_id, friends_list in grouped.items():
-                            try:
-                                str_p = str(int(parent_id))
-                                int_friends = list(set([int(x) for x in friends_list if pd.notna(x)]))
-                                if str_p in g_cache:
-                                    g_cache[str_p] = list(set(g_cache[str_p] + int_friends))
-                                else:
-                                    g_cache[str_p] = int_friends
-                                added_records += 1
-                            except ValueError:
-                                continue # Skip header corruptions or string nodes safely
-                
-                save_persistent_cache(g_cache)
-                st.success(f"🎉 Engine Optimization Successful! Merged {added_records} distinct profile maps into memory cache.")
-                st.rerun()
-            except Exception as e:
-                st.error(f"❌ Structural Ingestion Failure: {str(e)}. Formatting arrangement mismatch details.")
 
     # --- DATABASE MAINTENANCE PANELS ---
     st.markdown("---")
