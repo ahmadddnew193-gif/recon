@@ -27,13 +27,12 @@ DEFAULT_PROXIES = """38.154.203.95:5863:zwgfezql:u1o2humd1hr8
 2.57.20.2:6983:zwgfezql:u1o2humd1hr8"""
 
 
-# --- CARD-FREE CLOUD DATABASE ENGINE ---
+# --- DIAGNOSTIC CLOUD DATABASE ENGINE ---
 
 def load_persistent_cache():
-    """Downloads the graph from Hugging Face on startup to bypass Streamlit wipes."""
+    """Downloads the graph from Hugging Face on startup."""
     if HF_TOKEN and HF_REPO_ID:
         try:
-            # Safely pull the remote database copy down to the local runtime
             resolved_path = hf_hub_download(
                 repo_id=HF_REPO_ID,
                 filename=CACHE_FILE,
@@ -42,9 +41,8 @@ def load_persistent_cache():
             )
             with open(resolved_path, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except Exception:
-            # Fallback if the remote dataset doesn't have the file yet
-            pass
+        except Exception as e:
+            st.sidebar.error(f"⚠️ Initial Cloud Load Skipped: {str(e)}")
 
     if os.path.exists(CACHE_FILE):
         try:
@@ -63,22 +61,28 @@ def save_persistent_cache(cache_data):
         pass
 
 def upload_cache_to_cloud():
-    """Pushes the local file to Hugging Face datasets to ensure data persistence."""
-    if HF_TOKEN and HF_REPO_ID and os.path.exists(CACHE_FILE):
-        try:
-            api = HfApi()
-            api.upload_file(
-                path_or_fileobj=CACHE_FILE,
-                path_in_repo=CACHE_FILE,
-                repo_id=HF_REPO_ID,
-                repo_type="dataset",
-                token=HF_TOKEN,
-                commit_message="Automated execution social graph backup"
-            )
-            return True
-        except Exception:
-            return False
-    return False
+    """Pushes local file to HF and returns a status tuple (Success: bool, Details: str)"""
+    if not HF_TOKEN:
+        return False, "Secrets Error: 'HF_TOKEN' is missing or blank in Streamlit."
+    if not HF_REPO_ID:
+        return False, "Secrets Error: 'HF_REPO_ID' is missing or blank in Streamlit."
+    if not os.path.exists(CACHE_FILE):
+        return False, f"Local File Error: '{CACHE_FILE}' doesn't exist on server yet. Run a mock seed or scan first!"
+        
+    try:
+        api = HfApi()
+        api.upload_file(
+            path_or_fileobj=CACHE_FILE,
+            path_in_repo=CACHE_FILE,
+            repo_id=HF_REPO_ID,
+            repo_type="dataset",
+            token=HF_TOKEN,
+            commit_message="Automated execution social graph backup"
+        )
+        return True, "Success"
+    except Exception as e:
+        # Capture the explicit API error string (e.g., 401 Unauthorized, 404 Not Found)
+        return False, str(e)
 
 
 # Initialize unified session structures securely
@@ -157,15 +161,18 @@ with st.sidebar:
     st.metric("Roblox Profiles In Sync DB", len(st.session_state.global_cache))
     
     # Cloud sync diagnostics display
+    st.markdown("### ☁️ Cloud Sync Status")
     if HF_TOKEN and HF_REPO_ID:
-        st.success("☁️ Hugging Face Engine Linked")
+        st.caption(f"Linked Repo: `{HF_REPO_ID}`")
         if st.button("🔄 Force Push DB to Cloud", use_container_width=True):
-            if upload_cache_to_cloud():
+            success, diagnostic_msg = upload_cache_to_cloud()
+            if success:
                 st.toast("Database backed up successfully!", icon="🚀")
             else:
-                st.toast("Database cloud transfer dropped.", icon="❌")
+                # This error block will now render the clear Python/HF exception directly onto the UI
+                st.error(f"💥 Transfer Dropped:\n\n`{diagnostic_msg}`")
     else:
-        st.warning("⚠️ Running in Local-Only Mode")
+        st.warning("⚠️ Running in Local-Only Mode. Check your Streamlit Secrets configuration.")
 
 # --- Navigation Setup via Layout Tabs ---
 tab1, tab2, tab3 = st.tabs(["🚀 Graph Path Tracer", "🌍 Real Mass Harvester", "📦 Roblox Backbone Seeder & Tools"])
@@ -394,7 +401,7 @@ async def master_pipeline_engine(s_id, t_id, proxies):
 
         if results_container["new_discoveries"]:
             save_persistent_cache(g_cache)
-            upload_cache_to_cloud() # Push newly discovered pairs securely to Hugging Face
+            upload_cache_to_cloud()
 
         if results_container["final_chain"]:
             clean_chain = []
@@ -479,7 +486,6 @@ async def harvester_spider_worker(worker_id, proxy, harvest_queue, shared_stats,
                     shared_stats["scraped_count"] += 1
                     shared_stats["uncommitted_records"] += 1
                     
-                    # Periodic local cache writes to protect memory pipeline
                     if shared_stats["uncommitted_records"] >= 100:
                         save_persistent_cache(g_cache)
                         shared_stats["uncommitted_records"] = 0
@@ -527,14 +533,13 @@ async def master_harvester_coordinator(seed_uid, max_profiles, proxies):
         st.session_state.harvester_running = False
         await asyncio.gather(*workers, return_exceptions=True)
         
-        # Save structural runtime metrics back to permanent cloud
         save_persistent_cache(st.session_state.global_cache)
         upload_cache_to_cloud()
 
 if start_harvest_btn and seed_id_input.isdigit():
     cleaned_proxies = parse_proxy_input(proxy_input)
     if cleaned_proxies:
-        st.session_state.running = False # Prevent multi-pipeline thread collisions
+        st.session_state.running = False 
         st.session_state.harvester_running = True
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -586,7 +591,7 @@ with tab3:
                 tasks.append(seed_worker(uid, p, session))
             await asyncio.gather(*tasks)
             save_persistent_cache(st.session_state.global_cache)
-            upload_cache_to_cloud() # Push the newly seeded structural changes up immediately
+            upload_cache_to_cloud()
             st.success(f"🎉 Backbone construction completed! Populated real connection matrices for selected Roblox hubs.")
 
     if ignite_seed:
@@ -649,4 +654,33 @@ with tab3:
         st.markdown("**Option A: The Complete Clean Slate**")
         wipe_all_btn = st.button("💥 Wipe Entire Cache File & Memory", use_container_width=True, type="secondary")
         if wipe_all_btn:
-            st.session_
+            st.session_state.global_cache = {}
+            if os.path.exists(CACHE_FILE):
+                try: os.remove(CACHE_FILE)
+                except Exception: pass
+            save_persistent_cache({})
+            upload_cache_to_cloud()
+            st.success("💥 Database dropped! Reset to 0 records.")
+            st.rerun()
+            
+    with m_col2:
+        st.markdown("**Option B: Scrub Injected Bridge Hubs Only**")
+        purge_hubs_btn = st.button("🧩 Scrub Mock Tracing Hubs Only", use_container_width=True)
+        if purge_hubs_btn:
+            g_cache = st.session_state.global_cache
+            mock_hubs = ["999101", "999102", "999103"]
+            nodes_altered = 0
+            for h_id in mock_hubs:
+                if h_id in g_cache:
+                    del g_cache[h_id]
+                    nodes_altered += 1
+            for key in list(g_cache.keys()):
+                orig_list = g_cache[key]
+                cleaned_list = [x for x in orig_list if str(x) not in mock_hubs]
+                if len(cleaned_list) != len(orig_list):
+                    g_cache[key] = cleaned_list
+                    nodes_altered += 1
+            save_persistent_cache(g_cache)
+            upload_cache_to_cloud()
+            st.success(f"✅ Scrubbed reference matrices! Removed {nodes_altered} link dependencies.")
+            st.rerun()
