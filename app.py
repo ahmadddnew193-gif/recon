@@ -66,8 +66,16 @@ def upload_cache_to_cloud():
         return False, "Secrets Error: 'HF_TOKEN' is missing or blank in Streamlit."
     if not HF_REPO_ID:
         return False, "Secrets Error: 'HF_REPO_ID' is missing or blank in Streamlit."
+        
+    # FORCE SYNC: Dump active memory straight to disk right before pushing
+    try:
+        with open(CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(st.session_state.global_cache, f)
+    except Exception as e:
+        return False, f"Local Disk Write Failure: {str(e)}"
+        
     if not os.path.exists(CACHE_FILE):
-        return False, f"Local File Error: '{CACHE_FILE}' doesn't exist on server yet. Run a mock seed or scan first!"
+        return False, f"Local File Error: '{CACHE_FILE}' failed to generate on server workspace."
         
     try:
         api = HfApi()
@@ -81,7 +89,6 @@ def upload_cache_to_cloud():
         )
         return True, "Success"
     except Exception as e:
-        # Capture the explicit API error string (e.g., 401 Unauthorized, 404 Not Found)
         return False, str(e)
 
 
@@ -168,8 +175,8 @@ with st.sidebar:
             success, diagnostic_msg = upload_cache_to_cloud()
             if success:
                 st.toast("Database backed up successfully!", icon="🚀")
+                st.rerun()
             else:
-                # This error block will now render the clear Python/HF exception directly onto the UI
                 st.error(f"💥 Transfer Dropped:\n\n`{diagnostic_msg}`")
     else:
         st.warning("⚠️ Running in Local-Only Mode. Check your Streamlit Secrets configuration.")
@@ -328,11 +335,13 @@ async def fetch_user_groups_async(session, user_id, proxy_list):
     return {}
 
 async def execute_group_intersection_scan(session, s_id, t_id, proxies, placeholder):
+    shared_ids = set()
     s_groups, t_groups = await asyncio.gather(
         fetch_user_groups_async(session, s_id, proxies),
         fetch_user_groups_async(session, t_id, proxies)
     )
-    shared_ids = set(s_groups.keys()).intersection(set(t_groups.keys()))
+    if s_groups and t_groups:
+        shared_ids = set(s_groups.keys()).intersection(set(t_groups.keys()))
     with placeholder:
         if shared_ids:
             st.warning(f"🎯 Direct Group Cross-Over Vector Detected! Found {len(shared_ids)} shared groups:")
