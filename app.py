@@ -1,623 +1,156 @@
-import streamlit as st
-import asyncio
-import aiohttp
-import json
 import os
-import time
-import random
-import pandas as pd
+import json
+import streamlit as st
+from huggingface_hub import HfApi, snapshot_download
 
-st.set_page_config(page_title="Recon Engine: Ultra Core", layout="wide")
+# --- CONFIGURATION ---
+HF_TOKEN = st.secrets.get("HF_TOKEN")
+REPO_ID = st.secrets.get("HF_REPO_ID")
+LOCAL_DATA_DIR = "scraped_chunks"
 
-CACHE_FILE = "roblox_graph_map.json"
+# Ensure the local data directory exists inside the Streamlit instance
+os.makedirs(LOCAL_DATA_DIR, exist_ok=True)
 
-# Pre-loaded verified Webshare proxy configuration
-DEFAULT_PROXIES = """38.154.203.95:5863:zwgfezql:u1o2humd1hr8
-198.105.121.200:6462:zwgfezql:u1o2humd1hr8
-64.137.96.74:6641:zwgfezql:u1o2humd1hr8
-209.127.138.10:5784:zwgfezql:u1o2humd1hr8
-38.154.185.97:6370:zwgfezql:u1o2humd1hr8
-84.247.60.125:6095:zwgfezql:u1o2humd1hr8
-142.111.67.146:5611:zwgfezql:u1o2humd1hr8
-191.96.254.138:6185:zwgfezql:u1o2humd1hr8
-23.229.19.94:8689:zwgfezql:u1o2humd1hr8
-2.57.20.2:6983:zwgfezql:u1o2humd1hr8"""
+# --- DATABASE LOGIC (SHARDING ENGINE) ---
 
 @st.cache_resource
-def load_persistent_cache():
-    if os.path.exists(CACHE_FILE):
-        try:
-            with open(CACHE_FILE, "r") as f:
-                return json.load(f)
-        except Exception:
-            return {}
-    return {}
-
-def save_persistent_cache(cache_data):
+def sync_database_from_cloud():
+    """Downloads the database folder from Hugging Face on application startup."""
+    if not HF_TOKEN or not REPO_ID:
+        st.warning("⚠️ Cloud tokens missing in secrets.toml. Operating in Local-Only Mode.")
+        return False
     try:
-        with open(CACHE_FILE, "w") as f:
-            json.dump(cache_data, f)
-    except Exception:
-        pass
+        with st.spinner("Synchronizing database from Hugging Face Hub..."):
+            # snapshot_download pulls down the entire folder system efficiently
+            snapshot_download(
+                repo_id=REPO_ID,
+                repo_type="dataset",
+                token=HF_TOKEN,
+                local_dir=LOCAL_DATA_DIR
+            )
+        st.toast("✅ Database synchronized successfully!", icon="🔥")
+        return True
+    except Exception as e:
+        st.error(f"Cloud Sync failed: {e}. Starting fresh locally.")
+        return False
 
-# Initialize unified session structures
-if "global_cache" not in st.session_state:
-    st.session_state.global_cache = load_persistent_cache()
-if "logs" not in st.session_state:
-    st.session_state.logs = []
-if "running" not in st.session_state:
-    st.session_state.running = False
-if "harvester_running" not in st.session_state:
-    st.session_state.harvester_running = False
-
-def parse_proxy_input(raw_text):
-    lines = raw_text.split("\n")
-    cleaned = []
-    for line in lines:
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith("http://") or line.startswith("https://"):
-            cleaned.append(line)
-        elif line.count(":") == 3:
-            parts = line.split(":")
-            cleaned.append(f"http://{parts[2]}:{parts[3]}@{parts[0]}:{parts[1]}")
-    return cleaned
-
-# --- FEATURE 3: TACTICAL HTML NODE CHAIN UI VISUALIZER ---
-def render_cyber_graph_ui(enriched_nodes):
-    html_elements = ""
-    for idx, node in enumerate(enriched_nodes):
-        is_endpoint = (idx == 0 or idx == len(enriched_nodes) - 1)
-        bg_color = "#111625" if is_endpoint else "#201612"
-        border_color = "#00E5FF" if is_endpoint else "#FF6D00"
-        text_color = "#E0E0E0"
-        
-        # Identify suspected routing alts (Accounts created in 2025 or 2026)
-        created_year = node["created"][:4]
-        is_suspected_alt = str(created_year) in ["2025", "2026"] and not is_endpoint
-        alt_badge = """<div style="color: #FF3D00; font-size: 10px; margin-top: 4px; font-weight: bold; text-shadow: 0 0 5px rgba(255,61,0,0.4);">⚠️ SUSPECTED ALT</div>""" if is_suspected_alt else ""
-        banned_badge = """<div style="color: #FF1744; font-size: 10px; margin-top: 4px; font-weight: bold;">🚫 BANNED</div>""" if node["isBanned"] else ""
-
-        role_label = "START TARGET" if idx == 0 else ("END TARGET" if idx == len(enriched_nodes) - 1 else f"BRIDGE NODE {idx}")
-
-        html_elements += f"""
-        <div style="display: flex; align-items: center; margin: 10px 0;">
-            <div style="background-color: {bg_color}; border: 1px solid {border_color}; 
-                        padding: 14px; border-radius: 6px; color: {text_color}; 
-                        font-family: 'Courier New', monospace; min-width: 170px; text-align: left;
-                        box-shadow: 0 0 15px rgba(0,0,0,0.5);">
-                <div style="font-size: 9px; color: {border_color}; font-weight: bold; letter-spacing: 1px;">{role_label}</div>
-                <div style="font-size: 14px; margin-top: 4px; font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{node['name']}</div>
-                <div style="font-size: 11px; opacity: 0.6; margin-top: 2px;">ID: {node['id']}</div>
-                <div style="font-size: 10px; opacity: 0.5; margin-top: 4px;">Born: {node['created']}</div>
-                {alt_badge}
-                {banned_badge}
-            </div>
-        """
-        if idx < len(enriched_nodes) - 1:
-            html_elements += """
-            <div style="padding: 0 12px; color: #00E5FF; font-size: 20px; font-weight: bold; 
-                        font-family: monospace; text-shadow: 0 0 8px rgba(0,229,255,0.6);">➔</div>
-            """
-            
-    full_container = f"""
-    <div style="display: flex; flex-wrap: wrap; align-items: center; padding: 15px; 
-                background-color: #070913; border-radius: 8px; border: 1px solid #1A1F35; margin-bottom: 20px;">
-        {html_elements}
-    </div>
+def get_shard_path(user_id: str) -> str:
     """
-    st.components.v1.html(full_container, height=160, scrolling=True)
-
-# --- Sidebar Configuration Control Array ---
-with st.sidebar:
-    st.header("⚙️ Global Control Array")
-    proxy_input = st.text_area("🌐 Webshare Proxy Gateways:", value=DEFAULT_PROXIES, height=220)
-    st.markdown("---")
-    st.metric("Roblox Profiles In Local DB", len(st.session_state.global_cache))
-
-# --- Navigation Setup via Layout Tabs ---
-tab1, tab2, tab3 = st.tabs(["🚀 Graph Path Tracer", "🌍 Real Mass Harvester", "📦 Roblox Backbone Seeder & Tools"])
-
-# ==========================================
-# TAB 1: GRAPH PATHFINDER CORE (REAL SCANS)
-# ==========================================
-with tab1:
-    st.subheader("Dual-Queue Target Analysis Execution")
-    
-    c1, c2 = st.columns(2)
-    with c1:
-        s_input = st.text_input("Start Profile ID:", "1703896246")
-    with c2:
-        t_input = st.text_input("Target Profile ID:", "140671171")
-        
-    btn_col1, btn_col2 = st.columns(2)
-    with btn_col1:
-        start_btn = st.button("🚀 Ignite Pipeline Swarm", use_container_width=True, type="primary")
-    with btn_col2:
-        stop_btn = st.button("🛑 Kill Pipeline Tasks", use_container_width=True)
-        
-    if stop_btn:
-        st.session_state.running = False
-        st.rerun()
-
-    console_placeholder = st.empty()
-    status_placeholder = st.empty()
-    group_placeholder = st.empty()
-
-# --- Async Core Processing Utilities (Optimized for Speed) ---
-async def cache_processor_task(network_queue, cache_queue, start_visited, target_visited, path_found_event, results_container):
-    g_cache = st.session_state.global_cache
-    while not path_found_event.is_set() and st.session_state.running:
-        try:
-            direction, node = cache_queue.get_nowait()
-        except asyncio.QueueEmpty:
-            await asyncio.sleep(0.001)
-            continue
-            
-        str_node = str(node)
-        friends = g_cache.get(str_node, [])
-        results_container["cache_hits"] += 1
-        
-        current_path = start_visited.get(node) if direction == "FORWARD" else target_visited.get(node)
-        if not current_path or len(current_path) >= 5:
-            continue
-            
-        for friend in friends:
-            friend_int = int(friend)
-            if direction == "FORWARD":
-                if friend_int in target_visited:
-                    results_container["final_chain"] = current_path + target_visited[friend_int][::-1]
-                    path_found_event.set()
-                    break
-                if friend_int not in start_visited:
-                    start_visited[friend_int] = current_path + [friend_int]
-                    if str(friend_int) in g_cache:
-                        cache_queue.put_nowait(("FORWARD", friend_int))
-                    else:
-                        network_queue.put_nowait(("FORWARD", friend_int))
-            else:
-                if friend_int in start_visited:
-                    results_container["final_chain"] = start_visited[friend_int] + current_path[::-1]
-                    path_found_event.set()
-                    break
-                if friend_int not in target_visited:
-                    target_visited[friend_int] = current_path + [friend_int]
-                    if str(friend_int) in g_cache:
-                        cache_queue.put_nowait(("REVERSE", friend_int))
-                    else:
-                        network_queue.put_nowait(("REVERSE", friend_int))
-
-async def proxy_worker_task(worker_id, proxy, network_queue, cache_queue, start_visited, target_visited, session, path_found_event, results_container, log_func):
-    base_delay = 1.1
-    g_cache = st.session_state.global_cache
-    
-    while not path_found_event.is_set() and st.session_state.running:
-        try:
-            direction, node = network_queue.get_nowait()
-        except asyncio.QueueEmpty:
-            await asyncio.sleep(0.02)
-            continue
-            
-        str_node = str(node)
-        if str_node in g_cache:
-            results_container["cache_hits"] += 1
-            cache_queue.put_nowait((direction, node))
-            continue
-            
-        current_path = start_visited.get(node) if direction == "FORWARD" else target_visited.get(node)
-        if not current_path or len(current_path) >= 5:
-            continue
-            
-        url = f"https://friends.roblox.com/v1/users/{node}/friends"
-        try:
-            async with session.get(url, proxy=proxy, timeout=5) as response:
-                results_container["api_calls"] += 1
-                
-                if response.status == 200:
-                    data = await response.json()
-                    friends = [int(f["id"]) for f in data.get("data", []) if not f.get("isDeleted", False)]
-                    
-                    g_cache[str_node] = friends
-                    results_container["new_discoveries"][str_node] = friends
-                    
-                    for friend in friends:
-                        if direction == "FORWARD":
-                            if friend in target_visited:
-                                results_container["final_chain"] = current_path + target_visited[friend][::-1]
-                                path_found_event.set()
-                                break
-                            if friend not in start_visited:
-                                start_visited[friend] = current_path + [friend]
-                                if str(friend) in g_cache:
-                                    cache_queue.put_nowait(("FORWARD", friend))
-                                else:
-                                    network_queue.put_nowait(("FORWARD", friend))
-                        else:
-                            if friend in start_visited:
-                                results_container["final_chain"] = start_visited[friend] + current_path[::-1]
-                                path_found_event.set()
-                                break
-                            if friend not in target_visited:
-                                target_visited[friend] = current_path + [friend]
-                                if str(friend) in g_cache:
-                                    cache_queue.put_nowait(("REVERSE", friend))
-                                else:
-                                    network_queue.put_nowait(("REVERSE", friend))
-                                    
-                    base_delay = max(base_delay - 0.05, 0.9)
-                    await asyncio.sleep(base_delay)
-                    
-                elif response.status == 429:
-                    network_queue.put_nowait((direction, node))
-                    await asyncio.sleep(10.0)
-                else:
-                    network_queue.put_nowait((direction, node))
-                    await asyncio.sleep(1.0)
-        except Exception:
-            network_queue.put_nowait((direction, node))
-            await asyncio.sleep(1.0)
-
-# --- FEATURE 1: GROUP INTERSECTION FINDER PROTOCOL ---
-async def fetch_user_groups_async(session, user_id, proxy_list):
-    url = f"https://groups.roblox.com/v1/users/{user_id}/groups/roles"
-    proxy = random.choice(proxy_list) if proxy_list else None
+    Deterministically routes a Roblox User ID to 1 of 100 sub-files.
+    This prevents memory spikes by keeping file reads tiny.
+    """
     try:
-        async with session.get(url, proxy=proxy, timeout=5) as response:
-            if response.status == 200:
-                data = await response.json()
-                return {g["group"]["id"]: g["group"]["name"] for g in data.get("data", [])}
-    except Exception:
-        pass
+        # Base the shard index on the last two digits of the user ID
+        shard_id = int(user_id) % 100
+    except ValueError:
+        # Fallback for alternative string keys
+        shard_id = sum(ord(char) for char in user_id) % 100
+    return os.path.join(LOCAL_DATA_DIR, f"shard_{shard_id}.json")
+
+def load_shard(file_path: str) -> dict:
+    """Safely loads a JSON shard file from disk."""
+    if os.path.exists(file_path):
+        with open(file_path, "r", encoding="utf-8") as f:
+            try:
+                return json.load(f)
+            except json.JSONDecodeError:
+                return {}
     return {}
 
-async def execute_group_intersection_scan(session, s_id, t_id, proxies, placeholder):
-    s_groups, t_groups = await asyncio.gather(
-        fetch_user_groups_async(session, s_id, proxies),
-        fetch_user_groups_async(session, t_id, proxies)
-    )
-    shared_ids = set(s_groups.keys()).intersection(set(t_groups.keys()))
-    with placeholder:
-        if shared_ids:
-            st.warning(f"🎯 Direct Group Cross-Over Vector Detected! Found {len(shared_ids)} shared groups:")
-            for gid in shared_ids:
-                st.markdown(f"• **Group:** {s_groups[gid]} `(ID: {gid})` ➔ [View Group](https://www.roblox.com/groups/{gid})")
-        else:
-            st.info("ℹ️ No directly shared structural Roblox Group vectors identified.")
+def save_user_profile(user_id: str, profile_data: dict):
+    """Saves or updates an individual user within their designated file chunk."""
+    file_path = get_shard_path(user_id)
+    shard_data = load_shard(file_path)
+    
+    # Append or update user details
+    shard_data[str(user_id)] = profile_data
+    
+    # Save the isolated chunk back to disk
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(shard_data, f, indent=2)
 
-# --- FEATURE 2: DEEP PROFILE INTELLIGENCE ENRICHMENT MATRIX ---
-async def fetch_profile_intel_async(session, user_id, proxy_list):
-    user_url = f"https://users.roblox.com/v1/users/{user_id}"
-    proxy = random.choice(proxy_list) if proxy_list else None
+def query_user_profile(user_id: str) -> dict:
+    """Retrieves an indexed user profile instantly without reading other files."""
+    file_path = get_shard_path(user_id)
+    shard_data = load_shard(file_path)
+    return shard_data.get(str(user_id))
+
+def backup_database_to_cloud():
+    """Uploads the local chunk structures back up to Hugging Face."""
+    if not HF_TOKEN or not REPO_ID:
+        st.error("Backup action halted: Missing credentials.")
+        return
+    
     try:
-        async with session.get(user_url, proxy=proxy, timeout=5) as resp:
-            if resp.status == 200:
-                data = await resp.json()
-                return {
-                    "id": user_id,
-                    "name": data.get("name", f"UID:{user_id}"),
-                    "created": data.get("created", "Unknown")[:10],
-                    "isBanned": data.get("isBanned", False)
-                }
-    except Exception:
-        pass
-    return {"id": user_id, "name": f"UID:{user_id}", "created": "Unknown", "isBanned": False}
+        api = HfApi()
+        with st.spinner("Uploading modified data chunks to Hugging Face..."):
+            # upload_folder calculates file hashes and ONLY transfers files
+            # that were actually changed or created during your scraping run!
+            api.upload_folder(
+                folder_path=LOCAL_DATA_DIR,
+                repo_id=REPO_ID,
+                repo_type="dataset",
+                token=HF_TOKEN,
+                commit_message="Automated execution batch database sync"
+            )
+        st.success("🚀 Backup completed! Remote storage synced successfully.")
+    except Exception as e:
+        st.error(f"Cloud Backup failed: {e}")
 
-async def master_pipeline_engine(s_id, t_id, proxies):
-    network_queue = asyncio.Queue()
-    cache_queue = asyncio.Queue()
-    start_visited = {s_id: [s_id]}
-    target_visited = {t_id: [t_id]}
+# --- INITIALIZATION ---
+# Trigger cloud data retrieval immediately upon execution lifecycle entry
+sync_database_from_cloud()
+
+
+# --- STREAMLIT USER INTERFACE ---
+st.title("🛡️ Card-Free 100GB Scalable Database App")
+st.write("This instance splits operations across 100 managed JSON blocks synced via Hugging Face.")
+
+tab1, tab2 = st.tabs(["Data Manipulation (Scraper Emulator)", "Data Query Engine"])
+
+with tab1:
+    st.header("Simulate Incoming Scraped Data")
     
-    g_cache = st.session_state.global_cache
-    if str(s_id) in g_cache: cache_queue.put_nowait(("FORWARD", s_id))
-    else: network_queue.put_nowait(("FORWARD", s_id))
-        
-    if str(t_id) in g_cache: cache_queue.put_nowait(("REVERSE", t_id))
-    else: network_queue.put_nowait(("REVERSE", t_id))
-        
-    path_found_event = asyncio.Event()
-    results_container = {"final_chain": [], "api_calls": 0, "cache_hits": 0, "new_discoveries": {}}
-
-    def log(msg):
-        st.session_state.logs.append(msg)
-        if len(st.session_state.logs) > 20: st.session_state.logs.pop(0)
-        with tab1: console_placeholder.code("\n".join(st.session_state.logs), language="bash")
-
-    log("[SYSTEM] Coordinating tracing pipelines. Deploying isolated swarm array...")
-
-    async with aiohttp.ClientSession() as session:
-        # Kick off Group Intersection Check parallel to the routing engine
-        asyncio.create_task(execute_group_intersection_scan(session, s_id, t_id, proxies, group_placeholder))
-        
-        workers = [asyncio.create_task(cache_processor_task(network_queue, cache_queue, start_visited, target_visited, path_found_event, results_container))]
-        for idx, proxy_url in enumerate(proxies):
-            workers.append(asyncio.create_task(proxy_worker_task(idx + 1, proxy_url, network_queue, cache_queue, start_visited, target_visited, session, path_found_event, results_container, log)))
-
-        while not path_found_event.is_set() and st.session_state.running:
-            with tab1:
-                status_placeholder.info(
-                    f"📡 Channels Functional: {len(proxies)} | ⚡ Memory Cache Hits: {results_container['cache_hits']} | "
-                    f"🌐 Outbound API Calls: {results_container['api_calls']} | 📂 Queue Backlog: {network_queue.qsize()}"
-                )
-            await asyncio.sleep(0.2)
-
-        path_found_event.set()
-        await asyncio.gather(*workers, return_exceptions=True)
-
-        if results_container["new_discoveries"]:
-            save_persistent_cache(g_cache)
-
-        if results_container["final_chain"]:
-            clean_chain = []
-            for u in results_container["final_chain"]:
-                if not clean_chain or clean_chain[-1] != u: clean_chain.append(u)
-                
-            log("[SUCCESS] Connection match mapped! Extracting intelligence telemetry profiles...")
+    input_id = st.text_input("Roblox User ID", placeholder="e.g., 1234567")
+    input_username = st.text_input("Username", placeholder="e.g., RobloxPlayer")
+    input_friends = st.text_area("Friends Array Data (Comma Separated IDs)", placeholder="45, 9821, 10243")
+    
+    if st.button("Commit Record to Local Storage"):
+        if input_id and input_username:
+            # Structuring the payload
+            friends_list = [f.strip() for f in input_friends.split(",") if f.strip()]
+            payload = {
+                "username": input_username,
+                "friends_count": len(friends_list),
+                "connections": friends_list
+            }
             
-            # Optimized Parallel Batch Intelligence Enrichment
-            intel_tasks = [fetch_profile_intel_async(session, uid, proxies) for uid in clean_chain]
-            enriched_profiles = await asyncio.gather(*intel_tasks)
-            
-            with tab1:
-                st.success("### 🎯 Target Chain Intersect Discovered")
-                # Trigger Feature 3 Graphic UI Array Injection
-                render_cyber_graph_ui(enriched_profiles)
+            # Save data locally
+            save_user_profile(input_id, payload)
+            st.success(f"Added record to local storage cluster: `{get_shard_path(input_id)}`")
         else:
-            log("[SYSTEM] Graph lookup complete. No direct friend connection chain found inside layer parameters.")
-        st.session_state.running = False
+            st.error("Please provide both a User ID and a Username.")
 
-if start_btn and s_input.isdigit() and t_input.isdigit():
-    cleaned_proxies = parse_proxy_input(proxy_input)
-    if cleaned_proxies:
-        st.session_state.running = True
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(master_pipeline_engine(int(s_input), int(t_input), cleaned_proxies))
+    st.markdown("---")
+    st.subheader("Cloud Synchronization Controls")
+    st.write("Because the dataset handles file state checks automatically, only changed blocks are pushed.")
+    
+    if st.button("Backup Changes to Hugging Face Cloud", type="primary"):
+        backup_database_to_cloud()
 
-# ==========================================
-# TAB 2: REAL ROBLOX CRAWLER HARVESTER
-# ==========================================
 with tab2:
-    st.subheader("🌍 Continuous Real-World Social Graph Harvester")
-    st.write("Harvests thousands of genuine profiles into your database by running an asynchronous spider walk through friends lists.")
+    st.header("Search Profile Records")
+    search_id = st.text_input("Enter target User ID for execution lookup:")
     
-    hc1, hc2 = st.columns(2)
-    with hc1:
-        seed_id_input = st.text_input("Harvester Seed User ID (Start Node):", "1703896246")
-    with hc2:
-        max_harvest = st.number_input("Max Users to Scrape Before Auto-Stop:", min_value=100, max_value=100000, value=2000, step=500)
-        
-    hbtn1, hbtn2 = st.columns(2)
-    with hbtn1:
-        start_harvest_btn = st.button("⚡ Ignite High-Speed Crawler", use_container_width=True, type="primary")
-    with hbtn2:
-        stop_harvest_btn = st.button("🛑 Force Stop Harvester", use_container_width=True)
-        
-    if stop_harvest_btn:
-        st.session_state.harvester_running = False
-        st.rerun()
-        
-    harvest_console = st.empty()
-    harvest_status = st.empty()
-
-async def harvester_spider_worker(worker_id, proxy, harvest_queue, shared_stats, session, proxies_list):
-    g_cache = st.session_state.global_cache
-    base_delay = 1.1
-    
-    while st.session_state.harvester_running and shared_stats["scraped_count"] < shared_stats["limit"]:
-        try:
-            user_id = harvest_queue.get_nowait()
-        except asyncio.QueueEmpty:
-            await asyncio.sleep(0.05)
-            continue
-            
-        str_user = str(user_id)
-        if str_user in g_cache:
-            for friend in g_cache[str_user]:
-                if len(g_cache) < 500000:
-                    harvest_queue.put_nowait(friend)
-            continue
-            
-        url = f"https://friends.roblox.com/v1/users/{user_id}/friends"
-        try:
-            async with session.get(url, proxy=proxy, timeout=5) as response:
-                shared_stats["total_api_calls"] += 1
-                
-                if response.status == 200:
-                    data = await response.json()
-                    friends = [int(f["id"]) for f in data.get("data", []) if not f.get("isDeleted", False)]
-                    
-                    g_cache[str_user] = friends
-                    shared_stats["scraped_count"] += 1
-                    shared_stats["uncommitted_records"] += 1
-                    
-                    if shared_stats["uncommitted_records"] >= 100:
-                        save_persistent_cache(g_cache)
-                        shared_stats["uncommitted_records"] = 0
-                        
-                    for friend in friends:
-                        if str(friend) not in g_cache:
-                            harvest_queue.put_nowait(friend)
-                            
-                    base_delay = max(base_delay - 0.05, 0.9)
-                    await asyncio.sleep(base_delay)
-                    
-                elif response.status == 429:
-                    harvest_queue.put_nowait(user_id)
-                    shared_stats["throttles"] += 1
-                    await asyncio.sleep(10.0)
-                else:
-                    await asyncio.sleep(1.0)
-        except Exception:
-            harvest_queue.put_nowait(user_id)
-            await asyncio.sleep(1.0)
-
-async def master_harvester_coordinator(seed_uid, max_profiles, proxies):
-    harvest_queue = asyncio.Queue()
-    harvest_queue.put_nowait(seed_uid)
-    shared_stats = {"scraped_count": 0, "limit": max_profiles, "total_api_calls": 0, "throttles": 0, "uncommitted_records": 0}
-    
-    async with aiohttp.ClientSession() as session:
-        workers = []
-        for idx, p_url in enumerate(proxies):
-            workers.append(asyncio.create_task(harvester_spider_worker(idx+1, p_url, harvest_queue, shared_stats, session, proxies)))
-            
-        while st.session_state.harvester_running and shared_stats["scraped_count"] < max_profiles:
-            with tab2:
-                harvest_status.success(
-                    f"🚀 Crawl Active | 📂 Real Profiles Added This Session: {shared_stats['scraped_count']} / {max_profiles} | "
-                    f"🌐 Outbound Connection Enquiries: {shared_stats['total_api_calls']} | ⚠️ Firewall Throttles: {shared_stats['throttles']}"
-                )
-                harvest_console.code(
-                    f"Queue Discovery Buffer Size: {harvest_queue.qsize()} profiles pending tracking.\n"
-                    f"RAM Cache buffer uncommitted rows: {shared_stats['uncommitted_records']}/100\n"
-                    f"Status: Ingesting verified friend network sequences...", language="bash"
-                )
-            await asyncio.sleep(1.0)
-            
-        st.session_state.harvester_running = False
-        await asyncio.gather(*workers, return_exceptions=True)
-        save_persistent_cache(st.session_state.global_cache)
-
-if start_harvest_btn and seed_id_input.isdigit():
-    cleaned_proxies = parse_proxy_input(proxy_input)
-    if cleaned_proxies:
-        st.session_state.harvester_running = True
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(master_harvester_coordinator(int(seed_id_input), int(max_harvest), cleaned_proxies))
-        st.rerun()
-
-# ==========================================
-# TAB 3: ROBLOX BACKBONE SEEDER & MANAGEMENT
-# ==========================================
-with tab3:
-    st.subheader("📥 Live Roblox Backbone Hub Pre-Seeder")
-    st.write("Build a real-world Roblox dataset inside your cache instantly. Select high-density infrastructure hubs (Admins, Devs, Traders) to fetch their active live friend circles.")
-    
-    famous_hubs = {
-        "Builderman (UID: 1)": 1,
-        "Roblox Official (UID: 18)": 18,
-        "Shedletsky / Telamon (UID: 261)": 261,
-        "Asimo3089 - Jailbreak Creator (UID: 12551)": 12551,
-        "Linkmon99 - Top Trader (UID: 472911)": 472911,
-        "Merely - Limiteds Collector (UID: 2032622)": 2032622,
-        "Badcc - Scripting Legend (UID: 1981245)": 1981245
-    }
-    
-    selected_hubs = st.multiselect("Select Core Roblox Hubs to Map:", list(famous_hubs.keys()), default=list(famous_hubs.keys()))
-    custom_seed_list = st.text_input("Append Extra Custom Roblox Hub UIDs (Comma-separated):", placeholder="e.g. 1703896246, 140671171")
-    
-    ignite_seed = st.button("🔥 Run Asynchronous Roblox Seed Swarm", use_container_width=True, type="primary")
-    
-    async def seed_worker(uid, proxy, session):
-        g_cache = st.session_state.global_cache
-        url = f"https://friends.roblox.com/v1/users/{uid}/friends"
-        try:
-            async with session.get(url, proxy=proxy, timeout=6) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    friends = [int(f["id"]) for f in data.get("data", []) if not f.get("isDeleted", False)]
-                    g_cache[str(uid)] = friends
-                    return len(friends)
-        except Exception:
-            pass
-        return 0
-
-    async def run_hub_seeder(id_list, proxies):
-        async with aiohttp.ClientSession() as session:
-            tasks = []
-            for i, uid in enumerate(id_list):
-                p = proxies[i % len(proxies)] if proxies else None
-                tasks.append(seed_worker(uid, p, session))
-            await asyncio.gather(*tasks)
-            save_persistent_cache(st.session_state.global_cache)
-            st.success(f"🎉 Backbone construction completed! Populated real connection matrices for selected Roblox hubs.")
-
-    if ignite_seed:
-        target_uids = [famous_hubs[name] for name in selected_hubs]
-        if custom_seed_list.strip():
-            for c_id in custom_seed_list.split(","):
-                if c_id.strip().isdigit(): target_uids.append(int(c_id.strip()))
-                
-        cleaned_proxies = parse_proxy_input(proxy_input)
-        if target_uids and cleaned_proxies:
-            with st.spinner("Swarming Roblox servers to assemble real-world native backbone..."):
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                loop.run_until_complete(run_hub_seeder(target_uids, cleaned_proxies))
-                st.rerun()
-
-    # --- SYNTHETIC SEEDER PANEL ---
-    st.markdown("---")
-    st.subheader("📦 Fake Local Data Mock-Generator")
-    seed_start = st.text_input("Simulate Start ID Entry:", value="1703896246")
-    seed_target = st.text_input("Simulate Target ID Entry:", value="140671171")
-    profile_volume = st.number_input("Background Density Nodes:", min_value=100, max_value=50000, value=5000, step=500)
-    generate_btn = st.button("⚡ Execute Mock Seeding", use_container_width=True)
-    
-    if generate_btn and seed_start.isdigit() and seed_target.isdigit():
-        database = {}
-        s_id_int, t_id_int = int(seed_start), int(seed_target)
-        hub_a, hub_b, hub_c = 999101, 999102, 999103
-        database[str(s_id_int)] = [hub_a]
-        database[str(hub_a)] = [s_id_int, hub_b]
-        database[str(hub_b)] = [hub_a, hub_c]
-        database[str(hub_c)] = [hub_b, t_id_int]
-        database[str(t_id_int)] = [hub_c]
-        filler_ids = [random.randint(2000000, 8000000) for _ in range(int(profile_volume))]
-        for uid in filler_ids:
-            str_uid = str(uid)
-            if str_uid not in database: database[str_uid] = []
-            database[str_uid].extend(random.sample(filler_ids, k=min(random.randint(15, 40), len(filler_ids))))
-        database[str(s_id_int)].extend(random.sample(filler_ids, k=20))
-        database[str(hub_a)].extend(random.sample(filler_ids, k=25))
-        database[str(hub_b)].extend(random.sample(filler_ids, k=25))
-        database[str(hub_c)].extend(random.sample(filler_ids, k=25))
-        database[str(t_id_int)].extend(random.sample(filler_ids, k=20))
-        for key in database:
-            database[key] = list(set([int(x) for x in database[key] if int(x) != int(key)]))
-        st.session_state.global_cache = database
-        save_persistent_cache(database)
-        st.success("✅ Mock Database Seeded!")
-        st.rerun()
-
-    # --- DATABASE MAINTENANCE PANELS ---
-    st.markdown("---")
-    st.subheader("🧹 Database Maintenance & Purge Utilities")
-    st.write("Safely erase structural entries from your system to toggle cleanly between synthetic testing and actual tracking jobs.")
-    
-    m_col1, m_col2 = st.columns(2)
-    
-    with m_col1:
-        st.markdown("**Option A: The Complete Clean Slate**")
-        wipe_all_btn = st.button("💥 Wipe Entire Cache File & Memory", use_container_width=True, type="secondary")
-        if wipe_all_btn:
-            st.session_state.global_cache = {}
-            if os.path.exists(CACHE_FILE):
-                try: os.remove(CACHE_FILE)
-                except Exception: pass
-            st.success("💥 Database dropped! Reset to 0 records.")
-            st.rerun()
-            
-    with m_col2:
-        st.markdown("**Option B: Scrub Injected Bridge Hubs Only**")
-        purge_hubs_btn = st.button("🧩 Scrub Mock Tracing Hubs Only", use_container_width=True)
-        if purge_hubs_btn:
-            g_cache = st.session_state.global_cache
-            mock_hubs = ["999101", "999102", "999103"]
-            nodes_altered = 0
-            for h_id in mock_hubs:
-                if h_id in g_cache:
-                    del g_cache[h_id]
-                    nodes_altered += 1
-            for key in list(g_cache.keys()):
-                orig_list = g_cache[key]
-                cleaned_list = [x for x in orig_list if str(x) not in mock_hubs]
-                if len(cleaned_list) != len(orig_list):
-                    g_cache[key] = cleaned_list
-                    nodes_altered += 1
-            save_persistent_cache(g_cache)
-            st.success(f"✅ Scrubbed reference matrices! Removed {nodes_altered} link dependencies.")
-            st.rerun()
+    if st.button("Execute Indexed Query"):
+        if search_id:
+            result = query_user_profile(search_id)
+            if result:
+                st.metric(label="Target Identity Username", value=result["username"])
+                st.metric(label="Total Logged Friends", value=result["friends_count"])
+                st.write("#### Tracked Structural Meta-Graph:")
+                st.json(result["connections"])
+            else:
+                st.warning(f"No entry recorded for ID '{search_id}' in partition index `{get_shard_path(search_id)}`.")
+        else:
+            st.error("Please enter a valid query parameters ID.")
