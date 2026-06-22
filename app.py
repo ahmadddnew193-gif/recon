@@ -5,6 +5,7 @@ import json
 import os
 import sqlite3
 import random
+import time
 import pandas as pd
 from huggingface_hub import HfApi, hf_hub_download
 
@@ -24,6 +25,74 @@ DEFAULT_PROXIES = """38.154.203.95:5863:zwgfezql:u1o2humd1hr8
 191.96.254.138:6185:zwgfezql:u1o2humd1hr8
 23.229.19.94:8689:zwgfezql:u1o2humd1hr8
 2.57.20.2:6983:zwgfezql:u1o2humd1hr8"""
+
+
+# --- ADVANCED PROXY POOL HEALTH MANAGER ---
+
+class ProxyPool:
+    def __init__(self, raw_proxy_strings):
+        self.proxies = self._parse_proxies(raw_proxy_strings)
+        # Structure: { proxy_url: {"status": "HEALTHY", "cool_down_until": 0, "failures": 0} }
+        self.registry = {p: {"status": "HEALTHY", "cool_down_until": 0, "failures": 0} for p in self.proxies}
+        
+    def _parse_proxies(self, text):
+        lines = text.split("\n")
+        cleaned = []
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("http://") or line.startswith("https://"):
+                cleaned.append(line)
+            elif line.count(":") == 3:
+                parts = line.split(":")
+                cleaned.append(f"http://{parts[2]}:{parts[3]}@{parts[0]}:{parts[1]}")
+        return cleaned
+
+    def get_healthy_proxy(self):
+        now = time.time()
+        available = []
+        for p, meta in self.registry.items():
+            if meta["status"] == "DEAD":
+                continue
+            if meta["status"] == "COOL_DOWN":
+                if now >= meta["cool_down_until"]:
+                    meta["status"] = "HEALTHY"
+                    meta["failures"] = 0
+                else:
+                    continue
+            available.append(p)
+            
+        if not available:
+            return None
+        return random.choice(available)
+
+    def report_status(self, proxy, status_code):
+        if proxy not in self.registry:
+            return
+            
+        now = time.time()
+        if status_code == 200:
+            self.registry[proxy]["status"] = "HEALTHY"
+            self.registry[proxy]["failures"] = 0
+        elif status_code == 429:
+            # 60 Second Penalty Box for Throttling
+            self.registry[proxy]["status"] = "COOL_DOWN"
+            self.registry[proxy]["cool_down_until"] = now + 60.0
+        else:
+            # Drop connection errors or alternative failures
+            self.registry[proxy]["failures"] += 1
+            if self.registry[proxy]["failures"] >= 4:
+                self.registry[proxy]["status"] = "DEAD"
+            else:
+                self.registry[proxy]["status"] = "COOL_DOWN"
+                self.registry[proxy]["cool_down_until"] = now + 15.0
+
+    def get_pool_diagnostics(self):
+        healthy = sum(1 for p in self.registry.values() if p["status"] == "HEALTHY")
+        cooling = sum(1 for p in self.registry.values() if p["status"] == "COOL_DOWN")
+        dead = sum(1 for p in self.registry.values() if p["status"] == "DEAD")
+        return healthy, cooling, dead
 
 
 # --- HEURISTIC INTELLIGENCE WEIGHTING ENGINE ---
@@ -115,15 +184,11 @@ def sync_entire_memory_to_sqlite():
         pass
 
 def upload_cache_to_cloud():
-    if not HF_TOKEN:
-        return False, "Secrets Error: 'HF_TOKEN' is missing or blank."
-    if not HF_REPO_ID:
-        return False, "Secrets Error: 'HF_REPO_ID' is missing or blank."
-        
+    if not HF_TOKEN or not HF_REPO_ID:
+        return False, "Configuration Missing"
     sync_entire_memory_to_sqlite()
     if not os.path.exists(DB_FILE):
-        return False, f"Local File Error: '{DB_FILE}' missing."
-        
+        return False, "Local DB missing"
     try:
         api = HfApi()
         api.upload_file(
@@ -150,20 +215,6 @@ if "harvester_running" not in st.session_state:
 if "seeder_running" not in st.session_state:
     st.session_state.seeder_running = False
 
-def parse_proxy_input(raw_text):
-    lines = raw_text.split("\n")
-    cleaned = []
-    for line in lines:
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith("http://") or line.startswith("https://"):
-            cleaned.append(line)
-        elif line.count(":") == 3:
-            parts = line.split(":")
-            cleaned.append(f"http://{parts[2]}:{parts[3]}@{parts[0]}:{parts[1]}")
-    return cleaned
-
 def render_cyber_graph_ui(enriched_nodes):
     html_elements = ""
     for idx, node in enumerate(enriched_nodes):
@@ -174,7 +225,7 @@ def render_cyber_graph_ui(enriched_nodes):
         
         created_year = node["created"][:4]
         is_suspected_alt = str(created_year) in ["2025", "2026"] and not is_endpoint
-        alt_badge = """<div style="color: #FF3D00; font-size: 10px; margin-top: 4px; font-weight: bold; text-shadow: 0 0 5px rgba(255,61,0,0.4);">⚠️ SUSPECTED ALT</div>""" if is_suspected_alt else ""
+        alt_badge = """<div style="color: #FF3D00; font-size: 10px; margin-top: 4px; font-weight: bold;">⚠️ SUSPECTED ALT</div>""" if is_suspected_alt else ""
         banned_badge = """<div style="color: #FF1744; font-size: 10px; margin-top: 4px; font-weight: bold;">🚫 BANNED</div>""" if node["isBanned"] else ""
 
         role_label = "START TARGET" if idx == 0 else ("END TARGET" if idx == len(enriched_nodes) - 1 else f"BRIDGE NODE {idx}")
@@ -183,8 +234,7 @@ def render_cyber_graph_ui(enriched_nodes):
         <div style="display: flex; align-items: center; margin: 10px 0;">
             <div style="background-color: {bg_color}; border: 1px solid {border_color}; 
                         padding: 14px; border-radius: 6px; color: {text_color}; 
-                        font-family: 'Courier New', monospace; min-width: 170px; text-align: left;
-                        box-shadow: 0 0 15px rgba(0,0,0,0.5);">
+                        font-family: 'Courier New', monospace; min-width: 170px; text-align: left;">
                 <div style="font-size: 9px; color: {border_color}; font-weight: bold; letter-spacing: 1px;">{role_label}</div>
                 <div style="font-size: 14px; margin-top: 4px; font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{node['name']}</div>
                 <div style="font-size: 11px; opacity: 0.6; margin-top: 2px;">ID: {node['id']}</div>
@@ -194,17 +244,9 @@ def render_cyber_graph_ui(enriched_nodes):
             </div>
         """
         if idx < len(enriched_nodes) - 1:
-            html_elements += """
-            <div style="padding: 0 12px; color: #00E5FF; font-size: 20px; font-weight: bold; 
-                        font-family: monospace; text-shadow: 0 0 8px rgba(0,229,255,0.6);">➔</div>
-            """
+            html_elements += """<div style="padding: 0 12px; color: #00E5FF; font-size: 20px; font-weight: bold; font-family: monospace;">➔</div>"""
             
-    full_container = f"""
-    <div style="display: flex; flex-wrap: wrap; align-items: center; padding: 15px; 
-                background-color: #070913; border-radius: 8px; border: 1px solid #1A1F35; margin-bottom: 20px;">
-        {html_elements}
-    </div>
-    """
+    full_container = f"""<div style="display: flex; flex-wrap: wrap; align-items: center; padding: 15px; background-color: #070913; border-radius: 8px; border: 1px solid #1A1F35; margin-bottom: 20px;">{html_elements}</div>"""
     st.components.v1.html(full_container, height=160, scrolling=True)
 
 
@@ -218,14 +260,12 @@ with st.sidebar:
     if HF_TOKEN and HF_REPO_ID:
         st.caption(f"Linked Repo: `{HF_REPO_ID}`")
         if st.button("🔄 Force Push DB to Cloud", use_container_width=True):
-            success, diagnostic_msg = upload_cache_to_cloud()
+            success, _ = upload_cache_to_cloud()
             if success:
-                st.toast("Database backed up successfully to SQLite cloud dataset!", icon="🚀")
+                st.toast("Database backed up successfully!", icon="🚀")
                 st.rerun()
-            else:
-                st.error(f"💥 Transfer Dropped:\n\n`{diagnostic_msg}`")
     else:
-        st.warning("⚠️ Running in Local-Only Mode. Check your Streamlit Secrets configuration.")
+        st.warning("⚠️ Running in Local-Only Mode.")
 
 tab1, tab2, tab3 = st.tabs(["🚀 Graph Path Tracer", "🌍 Real Mass Harvester", "📦 Roblox Backbone Seeder & Tools"])
 
@@ -299,11 +339,15 @@ async def cache_processor_task(network_queue, cache_queue, start_visited, target
                     else:
                         network_queue.put_nowait((f_score, ("REVERSE", friend_int)))
 
-async def proxy_worker_task(worker_id, proxy, network_queue, cache_queue, start_visited, target_visited, session, path_found_event, results_container, log_func):
-    base_delay = 1.1
+async def proxy_worker_task(worker_id, pool_manager, network_queue, cache_queue, start_visited, target_visited, session, path_found_event, results_container, log_func):
     g_cache = st.session_state.global_cache
     
     while not path_found_event.is_set() and st.session_state.running:
+        proxy = pool_manager.get_healthy_proxy()
+        if not proxy:
+            await asyncio.sleep(2.0)
+            continue
+            
         try:
             score, (direction, node) = network_queue.get_nowait()
         except asyncio.QueueEmpty:
@@ -325,6 +369,7 @@ async def proxy_worker_task(worker_id, proxy, network_queue, cache_queue, start_
         try:
             async with session.get(url, proxy=proxy, timeout=5) as response:
                 results_container["api_calls"] += 1
+                pool_manager.report_status(proxy, response.status)
                 
                 if response.status == 200:
                     data = await response.json()
@@ -358,23 +403,16 @@ async def proxy_worker_task(worker_id, proxy, network_queue, cache_queue, start_
                                     cache_queue.put_nowait((f_score, ("REVERSE", friend)))
                                 else:
                                     network_queue.put_nowait((f_score, ("REVERSE", friend)))
-                                    
-                    base_delay = max(base_delay - 0.05, 0.9)
-                    await asyncio.sleep(base_delay)
-                    
-                elif response.status == 429:
-                    network_queue.put_nowait((score, (direction, node)))
-                    await asyncio.sleep(10.0)
+                    await asyncio.sleep(0.1)
                 else:
                     network_queue.put_nowait((score, (direction, node)))
-                    await asyncio.sleep(1.0)
         except Exception:
+            pool_manager.report_status(proxy, 0)
             network_queue.put_nowait((score, (direction, node)))
-            await asyncio.sleep(1.0)
 
-async def fetch_user_groups_async(session, user_id, proxy_list):
+async def fetch_user_groups_async(session, user_id, pool_manager):
     url = f"https://groups.roblox.com/v1/users/{user_id}/groups/roles"
-    proxy = random.choice(proxy_list) if proxy_list else None
+    proxy = pool_manager.get_healthy_proxy()
     try:
         async with session.get(url, proxy=proxy, timeout=5) as response:
             if response.status == 200:
@@ -384,40 +422,35 @@ async def fetch_user_groups_async(session, user_id, proxy_list):
         pass
     return {}
 
-async def execute_group_intersection_scan(session, s_id, t_id, proxies, placeholder):
+async def execute_group_intersection_scan(session, s_id, t_id, pool_manager, placeholder):
     shared_ids = set()
     s_groups, t_groups = await asyncio.gather(
-        fetch_user_groups_async(session, s_id, proxies),
-        fetch_user_groups_async(session, t_id, proxies)
+        fetch_user_groups_async(session, s_id, pool_manager),
+        fetch_user_groups_async(session, t_id, pool_manager)
     )
     if s_groups and t_groups:
         shared_ids = set(s_groups.keys()).intersection(set(t_groups.keys()))
     with placeholder:
         if shared_ids:
-            st.warning(f"🎯 Direct Group Cross-Over Vector Detected! Found {len(shared_ids)} shared groups:")
+            st.warning(f"🎯 Direct Group Vector Detected! Found {len(shared_ids)} shared groups:")
             for gid in shared_ids:
-                st.markdown(f"• **Group:** {s_groups[gid]} `(ID: {gid})` ➔ [View Group](https://www.roblox.com/groups/{gid})")
+                st.markdown(f"• **Group:** {s_groups[gid]} `(ID: {gid})` ➔ [View](https://www.roblox.com/groups/{gid})")
         else:
             st.info("ℹ️ No directly shared structural Roblox Group vectors identified.")
 
-async def fetch_profile_intel_async(session, user_id, proxy_list):
+async def fetch_profile_intel_async(session, user_id, pool_manager):
     user_url = f"https://users.roblox.com/v1/users/{user_id}"
-    proxy = random.choice(proxy_list) if proxy_list else None
+    proxy = pool_manager.get_healthy_proxy()
     try:
         async with session.get(user_url, proxy=proxy, timeout=5) as resp:
             if resp.status == 200:
                 data = await resp.json()
-                return {
-                    "id": user_id,
-                    "name": data.get("name", f"UID:{user_id}"),
-                    "created": data.get("created", "Unknown")[:10],
-                    "isBanned": data.get("isBanned", False)
-                }
+                return {"id": user_id, "name": data.get("name", f"UID:{user_id}"), "created": data.get("created", "Unknown")[:10], "isBanned": data.get("isBanned", False)}
     except Exception:
         pass
     return {"id": user_id, "name": f"UID:{user_id}", "created": "Unknown", "isBanned": False}
 
-async def master_pipeline_engine(s_id, t_id, proxies):
+async def master_pipeline_engine(s_id, t_id, pool_manager):
     network_queue = asyncio.PriorityQueue()
     cache_queue = asyncio.PriorityQueue()
     start_visited = {s_id: [s_id]}
@@ -441,20 +474,22 @@ async def master_pipeline_engine(s_id, t_id, proxies):
         if len(st.session_state.logs) > 20: st.session_state.logs.pop(0)
         with tab1: console_placeholder.code("\n".join(st.session_state.logs), language="bash")
 
-    log("[SYSTEM] Coordinating heuristic tracing pipelines...")
+    log("[SYSTEM] Coordinating proxy health pools. Swarming pipeline arrays...")
 
     async with aiohttp.ClientSession() as session:
-        asyncio.create_task(execute_group_intersection_scan(session, s_id, t_id, proxies, group_placeholder))
+        asyncio.create_task(execute_group_intersection_scan(session, s_id, t_id, pool_manager, group_placeholder))
         
         workers = [asyncio.create_task(cache_processor_task(network_queue, cache_queue, start_visited, target_visited, path_found_event, results_container))]
-        for idx, proxy_url in enumerate(proxies):
-            workers.append(asyncio.create_task(proxy_worker_task(idx + 1, proxy_url, network_queue, cache_queue, start_visited, target_visited, session, path_found_event, results_container, log)))
+        # Launch 8 concurrent parallel pipeline channels reading from the pool manager
+        for idx in range(8):
+            workers.append(asyncio.create_task(proxy_worker_task(idx + 1, pool_manager, network_queue, cache_queue, start_visited, target_visited, session, path_found_event, results_container, log)))
 
         while not path_found_event.is_set() and st.session_state.running:
+            h, c, d = pool_manager.get_pool_diagnostics()
             with tab1:
                 status_placeholder.info(
-                    f"📡 Channels Functional: {len(proxies)} | ⚡ Memory Cache Hits: {results_container['cache_hits']} | "
-                    f"🌐 Outbound API Calls: {results_container['api_calls']} | 📂 Priority Queue Active"
+                    f"🟢 Healthy Proxies: {h} | 🟡 Cooling: {c} | 🔴 Dead: {d} | "
+                    f"⚡ Cache Hits: {results_container['cache_hits']} | 🌐 Total Outbound Requests: {results_container['api_calls']}"
                 )
             await asyncio.sleep(0.2)
 
@@ -469,25 +504,23 @@ async def master_pipeline_engine(s_id, t_id, proxies):
             for u in results_container["final_chain"]:
                 if not clean_chain or clean_chain[-1] != u: clean_chain.append(u)
                 
-            log("[SUCCESS] Connection match mapped! Extracting intelligence telemetry profiles...")
-            
-            intel_tasks = [fetch_profile_intel_async(session, uid, proxies) for uid in clean_chain]
+            log("[SUCCESS] Path mapping linked. Compiling targets...")
+            intel_tasks = [fetch_profile_intel_async(session, uid, pool_manager) for uid in clean_chain]
             enriched_profiles = await asyncio.gather(*intel_tasks)
-            
             with tab1:
                 st.success("### 🎯 Target Chain Intersect Discovered")
                 render_cyber_graph_ui(enriched_profiles)
         else:
-            log("[SYSTEM] Graph lookup complete. No direct friend connection chain found.")
+            log("[SYSTEM] Swarm complete. No path uncovered.")
         st.session_state.running = False
 
 if start_btn and s_input.isdigit() and t_input.isdigit():
-    cleaned_proxies = parse_proxy_input(proxy_input)
-    if cleaned_proxies:
+    pool_mgr = ProxyPool(proxy_input)
+    if pool_mgr.proxies:
         st.session_state.running = True
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        loop.run_until_complete(master_pipeline_engine(int(s_input), int(t_input), cleaned_proxies))
+        loop.run_until_complete(master_pipeline_engine(int(s_input), int(t_input), pool_mgr))
 
 
 # ==========================================
@@ -495,7 +528,7 @@ if start_btn and s_input.isdigit() and t_input.isdigit():
 # ==========================================
 with tab2:
     st.subheader("🌍 Continuous Real-World Social Graph Harvester")
-    st.write("Harvests thousands of genuine profiles into your database by running an asynchronous spider walk.")
+    st.write("Drives automated background harvesting across healthy proxy pipelines.")
     
     hc1, hc2 = st.columns(2)
     with hc1:
@@ -516,11 +549,15 @@ with tab2:
     harvest_console = st.empty()
     harvest_status = st.empty()
 
-async def harvester_spider_worker(worker_id, proxy, harvest_queue, shared_stats, session, proxies_list):
+async def harvester_spider_worker(worker_id, pool_manager, harvest_queue, shared_stats, session):
     g_cache = st.session_state.global_cache
-    base_delay = 1.1
     
     while st.session_state.harvester_running and shared_stats["scraped_count"] < shared_stats["limit"]:
+        proxy = pool_manager.get_healthy_proxy()
+        if not proxy:
+            await asyncio.sleep(2.0)
+            continue
+            
         try:
             user_id = harvest_queue.get_nowait()
         except asyncio.QueueEmpty:
@@ -530,14 +567,14 @@ async def harvester_spider_worker(worker_id, proxy, harvest_queue, shared_stats,
         str_user = str(user_id)
         if str_user in g_cache:
             for friend in g_cache[str_user]:
-                if len(g_cache) < 500000:
-                    harvest_queue.put_nowait(friend)
+                if len(g_cache) < 500000: harvest_queue.put_nowait(friend)
             continue
             
         url = f"https://friends.roblox.com/v1/users/{user_id}/friends"
         try:
             async with session.get(url, proxy=proxy, timeout=5) as response:
                 shared_stats["total_api_calls"] += 1
+                pool_manager.report_status(proxy, response.status)
                 
                 if response.status == 200:
                     data = await response.json()
@@ -554,41 +591,32 @@ async def harvester_spider_worker(worker_id, proxy, harvest_queue, shared_stats,
                         upload_cache_to_cloud()
                         
                     for friend in friends:
-                        if str(friend) not in g_cache:
-                            harvest_queue.put_nowait(friend)
-                            
-                    base_delay = max(base_delay - 0.05, 0.9)
-                    await asyncio.sleep(base_delay)
-                    
-                elif response.status == 429:
-                    harvest_queue.put_nowait(user_id)
-                    shared_stats["throttles"] += 1
-                    await asyncio.sleep(10.0)
+                        if str(friend) not in g_cache: harvest_queue.put_nowait(friend)
+                    await asyncio.sleep(0.1)
                 else:
-                    await asyncio.sleep(1.0)
+                    harvest_queue.put_nowait(user_id)
         except Exception:
+            pool_manager.report_status(proxy, 0)
             harvest_queue.put_nowait(user_id)
-            await asyncio.sleep(1.0)
 
-async def master_harvester_coordinator(seed_uid, max_profiles, proxies):
+async def master_harvester_coordinator(seed_uid, max_profiles, pool_manager):
     harvest_queue = asyncio.Queue()
     harvest_queue.put_nowait(seed_uid)
-    shared_stats = {"scraped_count": 0, "limit": max_profiles, "total_api_calls": 0, "throttles": 0, "uncommitted_records": 0}
+    shared_stats = {"scraped_count": 0, "limit": max_profiles, "total_api_calls": 0, "uncommitted_records": 0}
     
     async with aiohttp.ClientSession() as session:
         workers = []
-        for idx, p_url in enumerate(proxies):
-            workers.append(asyncio.create_task(harvester_spider_worker(idx+1, p_url, harvest_queue, shared_stats, session, proxies)))
+        for idx in range(6):
+            workers.append(asyncio.create_task(harvester_spider_worker(idx+1, pool_manager, harvest_queue, shared_stats, session)))
             
         while st.session_state.harvester_running and shared_stats["scraped_count"] < max_profiles:
+            h, c, d = pool_manager.get_pool_diagnostics()
             with tab2:
                 harvest_status.success(
-                    f"🚀 Crawl Active | 📂 Real Profiles Added This Session: {shared_stats['scraped_count']} / {max_profiles} | "
-                    f"🌐 Outbound Connections: {shared_stats['total_api_calls']} | ⚠️ Throttles: {shared_stats['throttles']}"
+                    f"🚀 Crawl Active | Live Channels: H:{h} C:{c} D:{d} | "
+                    f"📂 Profiles Scraped: {shared_stats['scraped_count']} / {max_profiles}"
                 )
-                harvest_console.code(
-                    f"Queue Discovery Buffer Size: {harvest_queue.qsize()} profiles pending tracking.", language="bash"
-                )
+                harvest_console.code(f"Queue Discovery Buffer Size: {harvest_queue.qsize()} targets waiting.", language="bash")
             await asyncio.sleep(1.0)
             
         st.session_state.harvester_running = False
@@ -596,41 +624,34 @@ async def master_harvester_coordinator(seed_uid, max_profiles, proxies):
         upload_cache_to_cloud()
 
 if start_harvest_btn and seed_id_input.isdigit():
-    cleaned_proxies = parse_proxy_input(proxy_input)
-    if cleaned_proxies:
+    pool_mgr = ProxyPool(proxy_input)
+    if pool_mgr.proxies:
         st.session_state.running = False 
         st.session_state.harvester_running = True
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        loop.run_until_complete(master_harvester_coordinator(int(seed_id_input), int(max_harvest), cleaned_proxies))
+        loop.run_until_complete(master_harvester_coordinator(int(seed_id_input), int(max_harvest), pool_mgr))
         st.rerun()
 
 
 # ==========================================
-# TAB 3: UPGRADED DEEP ROBLOX BACKBONE SEEDER
+# TAB 3: ROBLOX BACKBONE SEEDER
 # ==========================================
 with tab3:
     st.subheader("📥 Live Advanced 2-Layer Backbone Hub Cultivator")
-    st.write("Constructs an ultra-fast local data highway system. Select key infrastructure seeds. The engine maps them, then cascades instantly down into layer-2 friend channels to pre-populate massive connection matrix clusters.")
     
     famous_hubs = {
         "Builderman (UID: 1)": 1,
         "Roblox Official (UID: 18)": 18,
-        "Shedletsky / Telamon (UID: 261)": 261,
-        "Asimo3089 - Jailbreak Creator (UID: 12551)": 12551,
-        "Linkmon99 - Top Trader (UID: 472911)": 472911,
-        "Merely - Limiteds Collector (UID: 2032622)": 2032622,
-        "Badcc - Scripting Legend (UID: 1981245)": 1981245
+        "Shedletsky (UID: 261)": 261,
+        "Asimo3089 - Jailbreak (UID: 12551)": 12551,
+        "Linkmon99 - Trader (UID: 472911)": 472911,
+        "Merely - Limiteds (UID: 2032622)": 2032622
     }
     
     selected_hubs = st.multiselect("Select Core Roblox Hubs to Map:", list(famous_hubs.keys()), default=list(famous_hubs.keys())[:3])
-    custom_seed_list = st.text_input("Append Extra Custom Roblox Hub UIDs (Comma-separated):")
-    
-    sc1, sc2 = st.columns(2)
-    with sc1:
-        max_layer2_nodes = st.number_input("Max Layer-2 Profiles to Swarm:", min_value=10, max_value=2000, value=250, step=50)
-    with sc2:
-        st.write("") # Spacer
+    custom_seed_list = st.text_input("Append Extra Custom Roblox Hub UIDs:")
+    max_layer2_nodes = st.number_input("Max Layer-2 Profiles to Swarm:", min_value=10, max_value=2000, value=250, step=50)
         
     s_col1, s_col2 = st.columns(2)
     with s_col1:
@@ -645,17 +666,19 @@ with tab3:
     seeder_status = st.empty()
     seeder_console = st.empty()
 
-    async def seed_worker_pipeline(uid, proxy, session, shared_metrics):
+    async def seed_worker_pipeline(uid, pool_manager, session, shared_metrics):
         g_cache = st.session_state.global_cache
         str_uid = str(uid)
-        
-        if str_uid in g_cache:
-            return g_cache[str_uid]
+        if str_uid in g_cache: return g_cache[str_uid]
             
+        proxy = pool_manager.get_healthy_proxy()
+        if not proxy: return []
+        
         url = f"https://friends.roblox.com/v1/users/{uid}/friends"
         try:
             async with session.get(url, proxy=proxy, timeout=6) as resp:
                 shared_metrics["api_calls"] += 1
+                pool_manager.report_status(proxy, resp.status)
                 if resp.status == 200:
                     data = await resp.json()
                     friends = [int(f["id"]) for f in data.get("data", []) if not f.get("isDeleted", False)]
@@ -663,61 +686,45 @@ with tab3:
                     save_single_profile_to_db(str_uid, friends)
                     shared_metrics["saved_nodes"] += 1
                     return friends
-                elif resp.status == 429:
-                    shared_metrics["throttles"] += 1
         except Exception:
-            pass
+            pool_manager.report_status(proxy, 0)
         return []
 
-    async def run_deep_hub_seeder(primary_uids, proxies, max_l2):
-        shared_metrics = {"api_calls": 0, "saved_nodes": 0, "throttles": 0, "current_target": "Initializing"}
+    async def run_deep_hub_seeder(primary_uids, pool_manager, max_l2):
+        shared_metrics = {"api_calls": 0, "saved_nodes": 0, "current_target": "Initializing"}
         g_cache = st.session_state.global_cache
         
         async with aiohttp.ClientSession() as session:
-            # Layer 1: Core Target Extraction
-            shared_metrics["current_target"] = f"Mapping {len(primary_uids)} primary hub nodes..."
+            shared_metrics["current_target"] = f"Mapping {len(primary_uids)} core seeds..."
             layer2_queue = []
             
-            for i, uid in enumerate(primary_uids):
+            for uid in primary_uids:
                 if not st.session_state.seeder_running: break
-                p = proxies[i % len(proxies)] if proxies else None
-                friends = await seed_worker_pipeline(uid, p, session, shared_metrics)
+                friends = await seed_worker_pipeline(uid, pool_manager, session, shared_metrics)
                 layer2_queue.extend(friends)
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(0.2)
                 
-            # Deduplicate layer 2 targets and exclude already cached profiles
             layer2_queue = list(set([uid for uid in layer2_queue if str(uid) not in g_cache]))
             random.shuffle(layer2_queue)
             layer2_targets = layer2_queue[:max_l2]
             
-            # Layer 2: Mass Cluster Swarming
-            shared_metrics["current_target"] = f"Cascading down to {len(layer2_targets)} layer-2 interconnected profiles..."
+            shared_metrics["current_target"] = f"Cascading down to {len(layer2_targets)} secondary targets..."
             
             for idx, l2_uid in enumerate(layer2_targets):
                 if not st.session_state.seeder_running: break
-                p = proxies[idx % len(proxies)] if proxies else None
-                
+                h, c, d = pool_manager.get_pool_diagnostics()
                 with tab3:
-                    seeder_status.info(
-                        f"⚡ Swarm Active | 📂 Profiles Cached: {shared_metrics['saved_nodes']} | "
-                        f"🌐 API Queries: {shared_metrics['api_calls']} | ⚠️ Throttles: {shared_metrics['throttles']}"
-                    )
-                    seeder_console.code(
-                        f"Phase: {shared_metrics['current_target']}\n"
-                        f"Processing Target Vector [{idx + 1}/{len(layer2_targets)}]: UID {l2_uid}\n"
-                        f"Database Sync State: Active incremental commits...", language="bash"
-                    )
+                    seeder_status.info(f"⚡ Swarm Working | Channels: H:{h} C:{c} D:{d} | Cached: {shared_metrics['saved_nodes']}")
+                    seeder_console.code(f"Phase: {shared_metrics['current_target']}\nVector [{idx + 1}/{len(layer2_targets)}]: UID {l2_uid}", language="bash")
                 
-                await seed_worker_pipeline(l2_uid, p, session, shared_metrics)
-                # Polite rate throttle handling per proxy
-                await asyncio.sleep(0.8 / len(proxies))
+                await seed_worker_pipeline(l2_uid, pool_manager, session, shared_metrics)
+                await asyncio.sleep(0.1)
                 
-                if shared_metrics["saved_nodes"] % 25 == 0:
-                    upload_cache_to_cloud()
+                if shared_metrics["saved_nodes"] % 25 == 0: upload_cache_to_cloud()
                     
             upload_cache_to_cloud()
             st.session_state.seeder_running = False
-            st.success("🎉 Deep Social Highway built completely! Lookups will now prioritize these cached bridge points.")
+            st.success("🎉 Deep Social Highway established completely!")
 
     if ignite_seed:
         target_uids = [famous_hubs[name] for name in selected_hubs]
@@ -725,12 +732,12 @@ with tab3:
             for c_id in custom_seed_list.split(","):
                 if c_id.strip().isdigit(): target_uids.append(int(c_id.strip()))
                 
-        cleaned_proxies = parse_proxy_input(proxy_input)
-        if target_uids and cleaned_proxies:
+        pool_mgr = ProxyPool(proxy_input)
+        if target_uids and pool_mgr.proxies:
             st.session_state.seeder_running = True
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            loop.run_until_complete(run_deep_hub_seeder(target_uids, cleaned_proxies, int(max_layer2_nodes)))
+            loop.run_until_complete(run_deep_hub_seeder(target_uids, pool_mgr, int(max_layer2_nodes)))
             st.rerun()
 
     # --- SYNTHETIC SEEDER PANEL ---
@@ -760,8 +767,7 @@ with tab3:
         database[str(hub_b)].extend(random.sample(filler_ids, k=25))
         database[str(hub_c)].extend(random.sample(filler_ids, k=25))
         database[str(t_id_int)].extend(random.sample(filler_ids, k=20))
-        for key in database:
-            database[key] = list(set([int(x) for x in database[key] if int(x) != int(key)]))
+        for key in database: database[key] = list(set([int(x) for x in database[key] if int(x) != int(key)]))
         st.session_state.global_cache = database
         upload_cache_to_cloud()
         st.success("✅ Mock Database Seeded!")
@@ -770,10 +776,8 @@ with tab3:
     # --- DATABASE MAINTENANCE PANELS ---
     st.markdown("---")
     st.subheader("🧹 Database Maintenance & Purge Utilities")
-    
     m_col1, m_col2 = st.columns(2)
     with m_col1:
-        st.markdown("**Option A: The Complete Clean Slate**")
         wipe_all_btn = st.button("💥 Wipe Entire Cache File & Memory", use_container_width=True, type="secondary")
         if wipe_all_btn:
             st.session_state.global_cache = {}
@@ -782,26 +786,21 @@ with tab3:
                 except Exception: pass
             init_db()
             upload_cache_to_cloud()
-            st.success("💥 Database dropped! Reset to 0 records.")
+            st.success("💥 Database dropped!")
             st.rerun()
             
     with m_col2:
-        st.markdown("**Option B: Scrub Injected Bridge Hubs Only**")
         purge_hubs_btn = st.button("🧩 Scrub Mock Tracing Hubs Only", use_container_width=True)
         if purge_hubs_btn:
             g_cache = st.session_state.global_cache
             mock_hubs = ["999101", "999102", "999103"]
             nodes_altered = 0
             for h_id in mock_hubs:
-                if h_id in g_cache:
-                    del g_cache[h_id]
-                    nodes_altered += 1
+                if h_id in g_cache: del g_cache[h_id]; nodes_altered += 1
             for key in list(g_cache.keys()):
                 orig_list = g_cache[key]
                 cleaned_list = [x for x in orig_list if str(x) not in mock_hubs]
-                if len(cleaned_list) != len(orig_list):
-                    g_cache[key] = cleaned_list
-                    nodes_altered += 1
+                if len(cleaned_list) != len(orig_list): g_cache[key] = cleaned_list; nodes_altered += 1
             upload_cache_to_cloud()
-            st.success(f"✅ Scrubbed reference matrices! Removed {nodes_altered} link dependencies.")
+            st.success(f"✅ Scrubbed reference matrices! Removed {nodes_altered} links.")
             st.rerun()
