@@ -29,30 +29,16 @@ DEFAULT_PROXIES = """38.154.203.95:5863:zwgfezql:u1o2humd1hr8
 # --- HEURISTIC INTELLIGENCE WEIGHTING ENGINE ---
 
 def calculate_node_priority(node_id, g_cache):
-    """
-    Heuristic Scoring: Assigns lower scores to higher-value targets.
-    Lower Score = Processed FIRST by the Priority Queue.
-    """
     str_node = str(node_id)
-    
-    # Tier 1: Existing Cached Hubs (The ultimate bridges)
     if str_node in g_cache:
         friend_count = len(g_cache[str_node])
-        # The more friends they have, the lower their score goes (Max out bonus at 200 friends)
         return max(10, 200 - friend_count)
-        
-    # Tier 2: Legacy Roblox Accounts (UIDs < 200M) - highly interconnected
     if node_id < 200000000:
         return 300
-        
-    # Tier 3: Mid-Era Accounts (UIDs < 1B)
     if node_id < 1000000000:
         return 500
-        
-    # Tier 4: Modern Accounts / High probability Alts (UIDs > 4B)
     if node_id > 4000000000:
         return 1500
-        
     return 1000
 
 
@@ -130,13 +116,13 @@ def sync_entire_memory_to_sqlite():
 
 def upload_cache_to_cloud():
     if not HF_TOKEN:
-        return False, "Secrets Error: 'HF_TOKEN' is missing or blank in Streamlit."
+        return False, "Secrets Error: 'HF_TOKEN' is missing or blank."
     if not HF_REPO_ID:
-        return False, "Secrets Error: 'HF_REPO_ID' is missing or blank in Streamlit."
+        return False, "Secrets Error: 'HF_REPO_ID' is missing or blank."
         
     sync_entire_memory_to_sqlite()
     if not os.path.exists(DB_FILE):
-        return False, f"Local File Error: '{DB_FILE}' failed to generate on server workspace."
+        return False, f"Local File Error: '{DB_FILE}' missing."
         
     try:
         api = HfApi()
@@ -161,6 +147,8 @@ if "running" not in st.session_state:
     st.session_state.running = False
 if "harvester_running" not in st.session_state:
     st.session_state.harvester_running = False
+if "seeder_running" not in st.session_state:
+    st.session_state.seeder_running = False
 
 def parse_proxy_input(raw_text):
     lines = raw_text.split("\n")
@@ -242,7 +230,7 @@ with st.sidebar:
 tab1, tab2, tab3 = st.tabs(["🚀 Graph Path Tracer", "🌍 Real Mass Harvester", "📦 Roblox Backbone Seeder & Tools"])
 
 # ==========================================
-# TAB 1: GRAPH PATHFINDER CORE (HEURISTIC PRIORITY SEARCH)
+# TAB 1: GRAPH PATHFINDER CORE
 # ==========================================
 with tab1:
     st.subheader("Dual-Queue Target Analysis Execution (Informed Best-First Engine)")
@@ -271,7 +259,6 @@ async def cache_processor_task(network_queue, cache_queue, start_visited, target
     g_cache = st.session_state.global_cache
     while not path_found_event.is_set() and st.session_state.running:
         try:
-            # Pull based on priority ranking order
             score, (direction, node) = cache_queue.get_nowait()
         except asyncio.QueueEmpty:
             await asyncio.sleep(0.001)
@@ -431,7 +418,6 @@ async def fetch_profile_intel_async(session, user_id, proxy_list):
     return {"id": user_id, "name": f"UID:{user_id}", "created": "Unknown", "isBanned": False}
 
 async def master_pipeline_engine(s_id, t_id, proxies):
-    # Upgraded structural channels to Priority Queues
     network_queue = asyncio.PriorityQueue()
     cache_queue = asyncio.PriorityQueue()
     start_visited = {s_id: [s_id]}
@@ -455,7 +441,7 @@ async def master_pipeline_engine(s_id, t_id, proxies):
         if len(st.session_state.logs) > 20: st.session_state.logs.pop(0)
         with tab1: console_placeholder.code("\n".join(st.session_state.logs), language="bash")
 
-    log("[SYSTEM] Coordinating heuristic tracing pipelines. Deploying prioritized swarm array...")
+    log("[SYSTEM] Coordinating heuristic tracing pipelines...")
 
     async with aiohttp.ClientSession() as session:
         asyncio.create_task(execute_group_intersection_scan(session, s_id, t_id, proxies, group_placeholder))
@@ -492,7 +478,7 @@ async def master_pipeline_engine(s_id, t_id, proxies):
                 st.success("### 🎯 Target Chain Intersect Discovered")
                 render_cyber_graph_ui(enriched_profiles)
         else:
-            log("[SYSTEM] Graph lookup complete. No direct friend connection chain found inside layer parameters.")
+            log("[SYSTEM] Graph lookup complete. No direct friend connection chain found.")
         st.session_state.running = False
 
 if start_btn and s_input.isdigit() and t_input.isdigit():
@@ -509,7 +495,7 @@ if start_btn and s_input.isdigit() and t_input.isdigit():
 # ==========================================
 with tab2:
     st.subheader("🌍 Continuous Real-World Social Graph Harvester")
-    st.write("Harvests thousands of genuine profiles into your database by running an asynchronous spider walk through friends lists.")
+    st.write("Harvests thousands of genuine profiles into your database by running an asynchronous spider walk.")
     
     hc1, hc2 = st.columns(2)
     with hc1:
@@ -598,12 +584,10 @@ async def master_harvester_coordinator(seed_uid, max_profiles, proxies):
             with tab2:
                 harvest_status.success(
                     f"🚀 Crawl Active | 📂 Real Profiles Added This Session: {shared_stats['scraped_count']} / {max_profiles} | "
-                    f"🌐 Outbound Connection Enquiries: {shared_stats['total_api_calls']} | ⚠️ Firewall Throttles: {shared_stats['throttles']}"
+                    f"🌐 Outbound Connections: {shared_stats['total_api_calls']} | ⚠️ Throttles: {shared_stats['throttles']}"
                 )
                 harvest_console.code(
-                    f"Queue Discovery Buffer Size: {harvest_queue.qsize()} profiles pending tracking.\n"
-                    f"Incremental Saves written straight to DB execution blocks.\n"
-                    f"Status: Ingesting verified friend network sequences...", language="bash"
+                    f"Queue Discovery Buffer Size: {harvest_queue.qsize()} profiles pending tracking.", language="bash"
                 )
             await asyncio.sleep(1.0)
             
@@ -623,11 +607,11 @@ if start_harvest_btn and seed_id_input.isdigit():
 
 
 # ==========================================
-# TAB 3: ROBLOX BACKBONE SEEDER & MANAGEMENT
+# TAB 3: UPGRADED DEEP ROBLOX BACKBONE SEEDER
 # ==========================================
 with tab3:
-    st.subheader("📥 Live Roblox Backbone Hub Pre-Seeder")
-    st.write("Build a real-world Roblox dataset inside your cache instantly. Select high-density infrastructure hubs (Admins, Devs, Traders) to fetch their active live friend circles.")
+    st.subheader("📥 Live Advanced 2-Layer Backbone Hub Cultivator")
+    st.write("Constructs an ultra-fast local data highway system. Select key infrastructure seeds. The engine maps them, then cascades instantly down into layer-2 friend channels to pre-populate massive connection matrix clusters.")
     
     famous_hubs = {
         "Builderman (UID: 1)": 1,
@@ -639,35 +623,101 @@ with tab3:
         "Badcc - Scripting Legend (UID: 1981245)": 1981245
     }
     
-    selected_hubs = st.multiselect("Select Core Roblox Hubs to Map:", list(famous_hubs.keys()), default=list(famous_hubs.keys()))
-    custom_seed_list = st.text_input("Append Extra Custom Roblox Hub UIDs (Comma-separated):", placeholder="e.g. 1703896246, 140671171")
+    selected_hubs = st.multiselect("Select Core Roblox Hubs to Map:", list(famous_hubs.keys()), default=list(famous_hubs.keys())[:3])
+    custom_seed_list = st.text_input("Append Extra Custom Roblox Hub UIDs (Comma-separated):")
     
-    ignite_seed = st.button("🔥 Run Asynchronous Roblox Seed Swarm", use_container_width=True, type="primary")
-    
-    async def seed_worker(uid, proxy, session):
+    sc1, sc2 = st.columns(2)
+    with sc1:
+        max_layer2_nodes = st.number_input("Max Layer-2 Profiles to Swarm:", min_value=10, max_value=2000, value=250, step=50)
+    with sc2:
+        st.write("") # Spacer
+        
+    s_col1, s_col2 = st.columns(2)
+    with s_col1:
+        ignite_seed = st.button("🔥 Ignite 2-Layer Backbone Swarm", use_container_width=True, type="primary")
+    with s_col2:
+        kill_seed = st.button("🛑 Force Stop Seeder Swarm", use_container_width=True)
+        
+    if kill_seed:
+        st.session_state.seeder_running = False
+        st.rerun()
+        
+    seeder_status = st.empty()
+    seeder_console = st.empty()
+
+    async def seed_worker_pipeline(uid, proxy, session, shared_metrics):
         g_cache = st.session_state.global_cache
+        str_uid = str(uid)
+        
+        if str_uid in g_cache:
+            return g_cache[str_uid]
+            
         url = f"https://friends.roblox.com/v1/users/{uid}/friends"
         try:
             async with session.get(url, proxy=proxy, timeout=6) as resp:
+                shared_metrics["api_calls"] += 1
                 if resp.status == 200:
                     data = await resp.json()
                     friends = [int(f["id"]) for f in data.get("data", []) if not f.get("isDeleted", False)]
-                    g_cache[str(uid)] = friends
-                    save_single_profile_to_db(str(uid), friends)
-                    return len(friends)
+                    g_cache[str_uid] = friends
+                    save_single_profile_to_db(str_uid, friends)
+                    shared_metrics["saved_nodes"] += 1
+                    return friends
+                elif resp.status == 429:
+                    shared_metrics["throttles"] += 1
         except Exception:
             pass
-        return 0
+        return []
 
-    async def run_hub_seeder(id_list, proxies):
+    async def run_deep_hub_seeder(primary_uids, proxies, max_l2):
+        shared_metrics = {"api_calls": 0, "saved_nodes": 0, "throttles": 0, "current_target": "Initializing"}
+        g_cache = st.session_state.global_cache
+        
         async with aiohttp.ClientSession() as session:
-            tasks = []
-            for i, uid in enumerate(id_list):
+            # Layer 1: Core Target Extraction
+            shared_metrics["current_target"] = f"Mapping {len(primary_uids)} primary hub nodes..."
+            layer2_queue = []
+            
+            for i, uid in enumerate(primary_uids):
+                if not st.session_state.seeder_running: break
                 p = proxies[i % len(proxies)] if proxies else None
-                tasks.append(seed_worker(uid, p, session))
-            await asyncio.gather(*tasks)
+                friends = await seed_worker_pipeline(uid, p, session, shared_metrics)
+                layer2_queue.extend(friends)
+                await asyncio.sleep(0.5)
+                
+            # Deduplicate layer 2 targets and exclude already cached profiles
+            layer2_queue = list(set([uid for uid in layer2_queue if str(uid) not in g_cache]))
+            random.shuffle(layer2_queue)
+            layer2_targets = layer2_queue[:max_l2]
+            
+            # Layer 2: Mass Cluster Swarming
+            shared_metrics["current_target"] = f"Cascading down to {len(layer2_targets)} layer-2 interconnected profiles..."
+            
+            for idx, l2_uid in enumerate(layer2_targets):
+                if not st.session_state.seeder_running: break
+                p = proxies[idx % len(proxies)] if proxies else None
+                
+                with tab3:
+                    seeder_status.info(
+                        f"⚡ Swarm Active | 📂 Profiles Cached: {shared_metrics['saved_nodes']} | "
+                        f"🌐 API Queries: {shared_metrics['api_calls']} | ⚠️ Throttles: {shared_metrics['throttles']}"
+                    )
+                    seeder_console.code(
+                        f"Phase: {shared_metrics['current_target']}\n"
+                        f"Processing Target Vector [{idx + 1}/{len(layer2_targets)}]: UID {l2_uid}\n"
+                        f"Database Sync State: Active incremental commits...", language="bash"
+                    )
+                
+                await seed_worker_pipeline(l2_uid, p, session, shared_metrics)
+                # Polite rate throttle handling per proxy
+                await asyncio.sleep(0.8 / len(proxies))
+                
+                if shared_metrics["saved_nodes"] % 25 == 0:
+                    upload_cache_to_cloud()
+                    
             upload_cache_to_cloud()
-            st.success(f"🎉 Backbone construction completed! Populated real connection matrices for selected Roblox hubs.")
+            st.session_state.seeder_running = False
+            st.success("🎉 Deep Social Highway built completely! Lookups will now prioritize these cached bridge points.")
 
     if ignite_seed:
         target_uids = [famous_hubs[name] for name in selected_hubs]
@@ -677,11 +727,11 @@ with tab3:
                 
         cleaned_proxies = parse_proxy_input(proxy_input)
         if target_uids and cleaned_proxies:
-            with st.spinner("Swarming Roblox servers to assemble real-world native backbone..."):
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                loop.run_until_complete(run_hub_seeder(target_uids, cleaned_proxies))
-                st.rerun()
+            st.session_state.seeder_running = True
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(run_deep_hub_seeder(target_uids, cleaned_proxies, int(max_layer2_nodes)))
+            st.rerun()
 
     # --- SYNTHETIC SEEDER PANEL ---
     st.markdown("---")
@@ -714,16 +764,14 @@ with tab3:
             database[key] = list(set([int(x) for x in database[key] if int(x) != int(key)]))
         st.session_state.global_cache = database
         upload_cache_to_cloud()
-        st.success("✅ Mock Database Seeded into SQLite structural format!")
+        st.success("✅ Mock Database Seeded!")
         st.rerun()
 
     # --- DATABASE MAINTENANCE PANELS ---
     st.markdown("---")
     st.subheader("🧹 Database Maintenance & Purge Utilities")
-    st.write("Safely erase structural entries from your system to toggle cleanly between synthetic testing and actual tracking jobs.")
     
     m_col1, m_col2 = st.columns(2)
-    
     with m_col1:
         st.markdown("**Option A: The Complete Clean Slate**")
         wipe_all_btn = st.button("💥 Wipe Entire Cache File & Memory", use_container_width=True, type="secondary")
