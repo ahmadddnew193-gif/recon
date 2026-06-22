@@ -278,22 +278,23 @@ def render_live_crawler_spider_canvas(recent_nodes, buffer_size, total_scraped, 
 
 
 # --- DYNAMIC CYBER SPIDER WEB PATH VISUALIZER ---
-def render_spider_web_path_canvas(enriched_nodes):
+def render_spider_web_path_canvas(enriched_profiles):
     """
     Transforms sequential user connection steps into a multi-tiered tactical 
     cyber spider web canvas. No box shapes. Displays nodes distributed along web layers, 
     with a visual digital spider entity actively crawling through nodes.
     """
     nodes_payload = []
-    for idx, node in enumerate(enriched_nodes):
+    for idx, node in enumerate(enriched_profiles):
         nodes_payload.append({
             "id": str(node["id"]),
             "name": str(node["name"]),
             "created": str(node["created"]),
             "isBanned": bool(node["isBanned"]),
-            "role": "START" if idx == 0 else ("TARGET" if idx == len(enriched_nodes)-1 else f"BRIDGE-{idx}")
+            "role": "START" if idx == 0 else ("TARGET" if idx == len(enriched_profiles)-1 else f"BRIDGE-{idx}")
         })
 
+    # FIXED: Doubled curly braces inside JS template literals to prevent Python parsing errors
     web_html = f"""
     <!DOCTYPE html>
     <html>
@@ -399,10 +400,10 @@ def render_spider_web_path_canvas(enriched_nodes):
                     // Text parameters info boxes
                     ctx.fillStyle = '#ffffff';
                     ctx.font = "bold 10px 'Courier New'";
-                    ctx.fillText(`[${node.role}] ${node.name}`, node.x + 15, node.y - 4);
+                    ctx.fillText(`[${{node.role}}] ${{node.name}}`, node.x + 15, node.y - 4);
                     ctx.fillStyle = 'rgba(255,255,255,0.6)';
                     ctx.font = "9px 'Courier New'";
-                    ctx.fillText(`ID: ${node.id}`, node.x + 15, node.y + 7);
+                    ctx.fillText(`ID: ${{node.id}}`, node.x + 15, node.y + 7);
                     if(node.isBanned) {{
                         ctx.fillStyle = '#FF0055';
                         ctx.fillText("🚫 BANNED", node.x + 15, node.y + 18);
@@ -683,7 +684,6 @@ async def master_pipeline_engine(s_id, t_id, pool_manager):
             
             status_placeholder.info(f"🟢 Active Proxies: {h} | 🟡 Cool Down: {c} | 🔴 Dead Pool: {d} | ⚡ Cache Hits: {results_container['cache_hits']} | Outbound Net: {results_container['api_calls']}")
             
-            # Safely stream telemetry straight to the newly added spider live canvas feed in Tab 1
             with live_feed_placeholder:
                 render_live_crawler_spider_canvas(results_container["rolling_window"], q_total, results_container["cache_hits"] + results_container["api_calls"], active_status="SWARMING")
             await asyncio.sleep(0.2)
@@ -703,7 +703,6 @@ async def master_pipeline_engine(s_id, t_id, pool_manager):
             intel_tasks = [fetch_profile_intel_async(session, uid, pool_manager) for uid in clean_chain]
             enriched_profiles = await asyncio.gather(*intel_tasks)
             
-            # Update the custom HTML5 Canvas showing the structured Spider Web configuration
             with graph_placeholder:
                 render_spider_web_path_canvas(enriched_profiles)
         else:
