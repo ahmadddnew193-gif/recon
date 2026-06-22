@@ -10,12 +10,10 @@ from huggingface_hub import HfApi, hf_hub_download
 
 st.set_page_config(page_title="Recon Engine: Ultra Core", layout="wide")
 
-# Database Configuration (Swapped from JSON to SQLite binary format)
 DB_FILE = "roblox_graph_map.db"
 HF_TOKEN = st.secrets.get("HF_TOKEN")
 HF_REPO_ID = st.secrets.get("HF_REPO_ID")
 
-# Pre-loaded verified Webshare proxy configuration
 DEFAULT_PROXIES = """38.154.203.95:5863:zwgfezql:u1o2humd1hr8
 198.105.121.200:6462:zwgfezql:u1o2humd1hr8
 64.137.96.74:6641:zwgfezql:u1o2humd1hr8
@@ -28,10 +26,39 @@ DEFAULT_PROXIES = """38.154.203.95:5863:zwgfezql:u1o2humd1hr8
 2.57.20.2:6983:zwgfezql:u1o2humd1hr8"""
 
 
+# --- HEURISTIC INTELLIGENCE WEIGHTING ENGINE ---
+
+def calculate_node_priority(node_id, g_cache):
+    """
+    Heuristic Scoring: Assigns lower scores to higher-value targets.
+    Lower Score = Processed FIRST by the Priority Queue.
+    """
+    str_node = str(node_id)
+    
+    # Tier 1: Existing Cached Hubs (The ultimate bridges)
+    if str_node in g_cache:
+        friend_count = len(g_cache[str_node])
+        # The more friends they have, the lower their score goes (Max out bonus at 200 friends)
+        return max(10, 200 - friend_count)
+        
+    # Tier 2: Legacy Roblox Accounts (UIDs < 200M) - highly interconnected
+    if node_id < 200000000:
+        return 300
+        
+    # Tier 3: Mid-Era Accounts (UIDs < 1B)
+    if node_id < 1000000000:
+        return 500
+        
+    # Tier 4: Modern Accounts / High probability Alts (UIDs > 4B)
+    if node_id > 4000000000:
+        return 1500
+        
+    return 1000
+
+
 # --- SQLITE TARGET DATABASE INFRASTRUCTURE ---
 
 def init_db():
-    """Initializes the SQLite schema locally."""
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute("""
@@ -44,7 +71,6 @@ def init_db():
     conn.close()
 
 def load_persistent_cache():
-    """Downloads DB from HF on startup and populates the localized memory array."""
     init_db()
     if HF_TOKEN and HF_REPO_ID:
         try:
@@ -54,7 +80,6 @@ def load_persistent_cache():
                 repo_type="dataset",
                 token=HF_TOKEN
             )
-            # Safe overwrite local DB workspace with cloud asset binary copy
             if os.path.exists(resolved_path):
                 with open(resolved_path, "rb") as f_src:
                     with open(DB_FILE, "wb") as f_dst:
@@ -62,7 +87,6 @@ def load_persistent_cache():
         except Exception as e:
             st.sidebar.error(f"⚠️ Initial Cloud Load Skipped: {str(e)}")
 
-    # Load records out of SQLite space straight into high-speed session dictionary
     memory_cache = {}
     try:
         conn = sqlite3.connect(DB_FILE)
@@ -77,7 +101,6 @@ def load_persistent_cache():
     return memory_cache
 
 def save_single_profile_to_db(user_id, friends_list):
-    """Saves a single scraped record incrementally straight to SQLite disk layer."""
     try:
         conn = sqlite3.connect(DB_FILE, timeout=20)
         cursor = conn.cursor()
@@ -91,11 +114,9 @@ def save_single_profile_to_db(user_id, friends_list):
         pass
 
 def sync_entire_memory_to_sqlite():
-    """Mass dumps active RAM matrix layout into local SQLite system blocks."""
     try:
         conn = sqlite3.connect(DB_FILE, timeout=30)
         cursor = conn.cursor()
-        # Batch execute parameters via optimized database transactions
         cursor.execute("BEGIN TRANSACTION")
         for uid, friends in st.session_state.global_cache.items():
             cursor.execute(
@@ -108,15 +129,12 @@ def sync_entire_memory_to_sqlite():
         pass
 
 def upload_cache_to_cloud():
-    """Pushes optimized SQLite binary package directly over HF Hub pipelines."""
     if not HF_TOKEN:
         return False, "Secrets Error: 'HF_TOKEN' is missing or blank in Streamlit."
     if not HF_REPO_ID:
         return False, "Secrets Error: 'HF_REPO_ID' is missing or blank in Streamlit."
         
-    # Flush current RAM values into database cells prior to sync push
     sync_entire_memory_to_sqlite()
-        
     if not os.path.exists(DB_FILE):
         return False, f"Local File Error: '{DB_FILE}' failed to generate on server workspace."
         
@@ -135,7 +153,6 @@ def upload_cache_to_cloud():
         return False, str(e)
 
 
-# Initialize unified session structures securely
 if "global_cache" not in st.session_state:
     st.session_state.global_cache = load_persistent_cache()
 if "logs" not in st.session_state:
@@ -159,7 +176,6 @@ def parse_proxy_input(raw_text):
             cleaned.append(f"http://{parts[2]}:{parts[3]}@{parts[0]}:{parts[1]}")
     return cleaned
 
-# --- TACTICAL HTML NODE CHAIN UI VISUALIZER ---
 def render_cyber_graph_ui(enriched_nodes):
     html_elements = ""
     for idx, node in enumerate(enriched_nodes):
@@ -203,14 +219,13 @@ def render_cyber_graph_ui(enriched_nodes):
     """
     st.components.v1.html(full_container, height=160, scrolling=True)
 
-# --- Sidebar Configuration Control Array ---
+
 with st.sidebar:
     st.header("⚙️ Global Control Array")
     proxy_input = st.text_area("🌐 Webshare Proxy Gateways:", value=DEFAULT_PROXIES, height=220)
     st.markdown("---")
     st.metric("Roblox Profiles In Sync DB", len(st.session_state.global_cache))
     
-    # Cloud sync diagnostics display
     st.markdown("### ☁️ Cloud Sync Status")
     if HF_TOKEN and HF_REPO_ID:
         st.caption(f"Linked Repo: `{HF_REPO_ID}`")
@@ -224,14 +239,13 @@ with st.sidebar:
     else:
         st.warning("⚠️ Running in Local-Only Mode. Check your Streamlit Secrets configuration.")
 
-# --- Navigation Setup via Layout Tabs ---
 tab1, tab2, tab3 = st.tabs(["🚀 Graph Path Tracer", "🌍 Real Mass Harvester", "📦 Roblox Backbone Seeder & Tools"])
 
 # ==========================================
-# TAB 1: GRAPH PATHFINDER CORE (REAL SCANS)
+# TAB 1: GRAPH PATHFINDER CORE (HEURISTIC PRIORITY SEARCH)
 # ==========================================
 with tab1:
-    st.subheader("Dual-Queue Target Analysis Execution")
+    st.subheader("Dual-Queue Target Analysis Execution (Informed Best-First Engine)")
     
     c1, c2 = st.columns(2)
     with c1:
@@ -257,7 +271,8 @@ async def cache_processor_task(network_queue, cache_queue, start_visited, target
     g_cache = st.session_state.global_cache
     while not path_found_event.is_set() and st.session_state.running:
         try:
-            direction, node = cache_queue.get_nowait()
+            # Pull based on priority ranking order
+            score, (direction, node) = cache_queue.get_nowait()
         except asyncio.QueueEmpty:
             await asyncio.sleep(0.001)
             continue
@@ -279,10 +294,11 @@ async def cache_processor_task(network_queue, cache_queue, start_visited, target
                     break
                 if friend_int not in start_visited:
                     start_visited[friend_int] = current_path + [friend_int]
+                    f_score = calculate_node_priority(friend_int, g_cache)
                     if str(friend_int) in g_cache:
-                        cache_queue.put_nowait(("FORWARD", friend_int))
+                        cache_queue.put_nowait((f_score, ("FORWARD", friend_int)))
                     else:
-                        network_queue.put_nowait(("FORWARD", friend_int))
+                        network_queue.put_nowait((f_score, ("FORWARD", friend_int)))
             else:
                 if friend_int in start_visited:
                     results_container["final_chain"] = start_visited[friend_int] + current_path[::-1]
@@ -290,10 +306,11 @@ async def cache_processor_task(network_queue, cache_queue, start_visited, target
                     break
                 if friend_int not in target_visited:
                     target_visited[friend_int] = current_path + [friend_int]
+                    f_score = calculate_node_priority(friend_int, g_cache)
                     if str(friend_int) in g_cache:
-                        cache_queue.put_nowait(("REVERSE", friend_int))
+                        cache_queue.put_nowait((f_score, ("REVERSE", friend_int)))
                     else:
-                        network_queue.put_nowait(("REVERSE", friend_int))
+                        network_queue.put_nowait((f_score, ("REVERSE", friend_int)))
 
 async def proxy_worker_task(worker_id, proxy, network_queue, cache_queue, start_visited, target_visited, session, path_found_event, results_container, log_func):
     base_delay = 1.1
@@ -301,7 +318,7 @@ async def proxy_worker_task(worker_id, proxy, network_queue, cache_queue, start_
     
     while not path_found_event.is_set() and st.session_state.running:
         try:
-            direction, node = network_queue.get_nowait()
+            score, (direction, node) = network_queue.get_nowait()
         except asyncio.QueueEmpty:
             await asyncio.sleep(0.02)
             continue
@@ -309,7 +326,8 @@ async def proxy_worker_task(worker_id, proxy, network_queue, cache_queue, start_
         str_node = str(node)
         if str_node in g_cache:
             results_container["cache_hits"] += 1
-            cache_queue.put_nowait((direction, node))
+            f_score = calculate_node_priority(node, g_cache)
+            cache_queue.put_nowait((f_score, (direction, node)))
             continue
             
         current_path = start_visited.get(node) if direction == "FORWARD" else target_visited.get(node)
@@ -330,6 +348,7 @@ async def proxy_worker_task(worker_id, proxy, network_queue, cache_queue, start_
                     results_container["new_discoveries"][str_node] = friends
                     
                     for friend in friends:
+                        f_score = calculate_node_priority(friend, g_cache)
                         if direction == "FORWARD":
                             if friend in target_visited:
                                 results_container["final_chain"] = current_path + target_visited[friend][::-1]
@@ -338,9 +357,9 @@ async def proxy_worker_task(worker_id, proxy, network_queue, cache_queue, start_
                             if friend not in start_visited:
                                 start_visited[friend] = current_path + [friend]
                                 if str(friend) in g_cache:
-                                    cache_queue.put_nowait(("FORWARD", friend))
+                                    cache_queue.put_nowait((f_score, ("FORWARD", friend)))
                                 else:
-                                    network_queue.put_nowait(("FORWARD", friend))
+                                    network_queue.put_nowait((f_score, ("FORWARD", friend)))
                         else:
                             if friend in start_visited:
                                 results_container["final_chain"] = start_visited[friend] + current_path[::-1]
@@ -349,21 +368,21 @@ async def proxy_worker_task(worker_id, proxy, network_queue, cache_queue, start_
                             if friend not in target_visited:
                                 target_visited[friend] = current_path + [friend]
                                 if str(friend) in g_cache:
-                                    cache_queue.put_nowait(("REVERSE", friend))
+                                    cache_queue.put_nowait((f_score, ("REVERSE", friend)))
                                 else:
-                                    network_queue.put_nowait(("REVERSE", friend))
+                                    network_queue.put_nowait((f_score, ("REVERSE", friend)))
                                     
                     base_delay = max(base_delay - 0.05, 0.9)
                     await asyncio.sleep(base_delay)
                     
                 elif response.status == 429:
-                    network_queue.put_nowait((direction, node))
+                    network_queue.put_nowait((score, (direction, node)))
                     await asyncio.sleep(10.0)
                 else:
-                    network_queue.put_nowait((direction, node))
+                    network_queue.put_nowait((score, (direction, node)))
                     await asyncio.sleep(1.0)
         except Exception:
-            network_queue.put_nowait((direction, node))
+            network_queue.put_nowait((score, (direction, node)))
             await asyncio.sleep(1.0)
 
 async def fetch_user_groups_async(session, user_id, proxy_list):
@@ -412,17 +431,21 @@ async def fetch_profile_intel_async(session, user_id, proxy_list):
     return {"id": user_id, "name": f"UID:{user_id}", "created": "Unknown", "isBanned": False}
 
 async def master_pipeline_engine(s_id, t_id, proxies):
-    network_queue = asyncio.Queue()
-    cache_queue = asyncio.Queue()
+    # Upgraded structural channels to Priority Queues
+    network_queue = asyncio.PriorityQueue()
+    cache_queue = asyncio.PriorityQueue()
     start_visited = {s_id: [s_id]}
     target_visited = {t_id: [t_id]}
     
     g_cache = st.session_state.global_cache
-    if str(s_id) in g_cache: cache_queue.put_nowait(("FORWARD", s_id))
-    else: network_queue.put_nowait(("FORWARD", s_id))
+    s_score = calculate_node_priority(s_id, g_cache)
+    t_score = calculate_node_priority(t_id, g_cache)
+    
+    if str(s_id) in g_cache: cache_queue.put_nowait((s_score, ("FORWARD", s_id)))
+    else: network_queue.put_nowait((s_score, ("FORWARD", s_id)))
         
-    if str(t_id) in g_cache: cache_queue.put_nowait(("REVERSE", t_id))
-    else: network_queue.put_nowait(("REVERSE", t_id))
+    if str(t_id) in g_cache: cache_queue.put_nowait((t_score, ("REVERSE", t_id)))
+    else: network_queue.put_nowait((t_score, ("REVERSE", t_id)))
         
     path_found_event = asyncio.Event()
     results_container = {"final_chain": [], "api_calls": 0, "cache_hits": 0, "new_discoveries": {}}
@@ -432,7 +455,7 @@ async def master_pipeline_engine(s_id, t_id, proxies):
         if len(st.session_state.logs) > 20: st.session_state.logs.pop(0)
         with tab1: console_placeholder.code("\n".join(st.session_state.logs), language="bash")
 
-    log("[SYSTEM] Coordinating tracing pipelines. Deploying isolated swarm array...")
+    log("[SYSTEM] Coordinating heuristic tracing pipelines. Deploying prioritized swarm array...")
 
     async with aiohttp.ClientSession() as session:
         asyncio.create_task(execute_group_intersection_scan(session, s_id, t_id, proxies, group_placeholder))
@@ -445,7 +468,7 @@ async def master_pipeline_engine(s_id, t_id, proxies):
             with tab1:
                 status_placeholder.info(
                     f"📡 Channels Functional: {len(proxies)} | ⚡ Memory Cache Hits: {results_container['cache_hits']} | "
-                    f"🌐 Outbound API Calls: {results_container['api_calls']} | 📂 Queue Backlog: {network_queue.qsize()}"
+                    f"🌐 Outbound API Calls: {results_container['api_calls']} | 📂 Priority Queue Active"
                 )
             await asyncio.sleep(0.2)
 
@@ -542,7 +565,6 @@ async def harvester_spider_worker(worker_id, proxy, harvest_queue, shared_stats,
                     
                     if shared_stats["uncommitted_records"] >= 50:
                         shared_stats["uncommitted_records"] = 0
-                        # Trigger an asynchronous upload call out to Hugging Face backup pools
                         upload_cache_to_cloud()
                         
                     for friend in friends:
