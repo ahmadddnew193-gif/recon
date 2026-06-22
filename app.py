@@ -15,7 +15,7 @@ DB_FILE = "roblox_graph_map.db"
 HF_TOKEN = st.secrets.get("HF_TOKEN")
 HF_REPO_ID = st.secrets.get("HF_REPO_ID")
 
-# Combined Proxy Array: Merging both authentication pools seamlessly
+# Combined Proxy Array: Preserving all 20 proxies from both credentials channels
 DEFAULT_PROXIES = """38.154.203.95:5863:zwgfezql:u1o2humd1hr8
 198.105.121.200:6462:zwgfezql:u1o2humd1hr8
 64.137.96.74:6641:zwgfezql:u1o2humd1hr8
@@ -162,7 +162,6 @@ def load_persistent_cache():
 
 def save_single_profile_to_db(user_id, friends_list):
     try:
-        # High timeout value prevents file-locking drops during background crawls
         conn = sqlite3.connect(DB_FILE, timeout=60.0)
         cursor = conn.cursor()
         cursor.execute(
@@ -188,6 +187,7 @@ def sync_entire_memory_to_sqlite():
         conn.close()
     except Exception:
         pass
+
 
 # --- THREAD-ISOLATED CLOUD LOCK ENGINE ---
 
@@ -218,7 +218,6 @@ async def upload_cache_to_cloud_async():
     async with st.session_state.cloud_lock:
         success, diagnostics = await asyncio.to_thread(upload_cache_to_cloud_blocking)
         if not success:
-            # Safely logs to dashboard console output stream instead of breaking runtimes
             st.session_state.logs.append(f"[CLOUD-WARN] Backup delayed: {diagnostics}")
         return success, diagnostics
 
@@ -233,6 +232,118 @@ if "harvester_running" not in st.session_state:
     st.session_state.harvester_running = False
 if "seeder_running" not in st.session_state:
     st.session_state.seeder_running = False
+
+
+# --- FINAL BEST FEATURE: TOPOLOGICAL INTERACTIVE CANVAS LAYOUT ENGINE ---
+
+def render_interactive_topological_graph(enriched_nodes):
+    nodes_js = []
+    edges_js = []
+    g_cache = st.session_state.global_cache
+    node_ids = [int(n["id"]) for n in enriched_nodes]
+    
+    # 1. Compile Node Metadata Properties
+    for idx, node in enumerate(enriched_nodes):
+        uid = int(node["id"])
+        name = node["name"]
+        created = node["created"]
+        is_banned = node["isBanned"]
+        
+        is_endpoint = (idx == 0 or idx == len(enriched_nodes) - 1)
+        role = "START TARGET" if idx == 0 else ("END TARGET" if idx == len(enriched_nodes) - 1 else f"BRIDGE NODE {idx}")
+        
+        is_alt = str(created[:4]) in ["2025", "2026"] and not is_endpoint
+        
+        border_color = "#00E5FF" if is_endpoint else "#FF6D00"
+        bg_color = "#111625" if is_endpoint else "#201612"
+        
+        if is_banned:
+            border_color = "#FF1744"
+        elif is_alt:
+            border_color = "#FF3D00"
+            
+        label = f"{role}\\n{name}\\n({uid})\\nBorn: {created}"
+        if is_banned: label += "\\n🚫 BANNED"
+        if is_alt: label += "\\n⚠️ SUSPECTED ALT"
+        
+        nodes_js.append({
+            "id": uid,
+            "label": label,
+            "shape": "box",
+            "margin": 12,
+            "color": {
+                "background": bg_color,
+                "border": border_color,
+                "highlight": {"background": "#1A233D", "border": "#FFFFFF"}
+            },
+            "font": {"color": "#E0E0E0", "face": "Courier New", "size": 11, "multi": True},
+            "borderWidth": 2
+        })
+        
+    # 2. Add Found Sequential Path Vectors
+    for i in range(len(node_ids) - 1):
+        edges_js.append({
+            "from": node_ids[i],
+            "to": node_ids[i+1],
+            "arrows": "to",
+            "color": {"color": "#00E5FF", "highlight": "#FFFFFF"},
+            "width": 3,
+            "label": "PATH STEP",
+            "font": {"color": "#00E5FF", "face": "Courier New", "size": 9, "align": "top"}
+        })
+        
+    # 3. Dynamic Matrix Scan: Reveal Latent Cluster Relations Between Tracked Nodes
+    for i in range(len(node_ids)):
+        for j in range(len(node_ids)):
+            if i < j and not (i == j - 1):
+                u1, u2 = node_ids[i], node_ids[j]
+                friends_list_1 = g_cache.get(str(u1), [])
+                friends_list_2 = g_cache.get(str(u2), [])
+                
+                if (u2 in friends_list_1) or (u1 in friends_list_2):
+                    edges_js.append({
+                        "from": u1,
+                        "to": u2,
+                        "arrows": "bidirectional",
+                        "color": {"color": "#FF3D00", "highlight": "#FFFFFF"},
+                        "width": 2,
+                        "dashes": True,
+                        "label": "LATENT CROSS-LINK",
+                        "font": {"color": "#FF3D00", "face": "Courier New", "size": 9, "align": "middle"}
+                    })
+                        
+    vis_html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+        <style type="text/css">
+            body {{ background-color: #070913; margin: 0; padding: 0; overflow: hidden; }}
+            #network-canvas {{ width: 100vw; height: 420px; background-color: #070913; border: 1px solid #1A1F35; border-radius: 8px; }}
+        </style>
+    </head>
+    <body>
+    <div id="network-canvas"></div>
+    <script type="text/javascript">
+        var nodes = new vis.DataSet({json.dumps(nodes_js)});
+        var edges = new vis.DataSet({json.dumps(edges_js)});
+        var container = document.getElementById('network-canvas');
+        var data = {{ nodes: nodes, edges: edges }};
+        var options = {{
+            physics: {{
+                enabled: true,
+                barnesHut: {{ gravitationalConstant: -2200, centralGravity: 0.25, springLength: 160, springConstant: 0.04, damping: 0.09 }},
+                stabilization: {{ iterations: 120 }}
+            }},
+            interaction: {{ hover: true, zoomView: true, dragView: true }}
+        }};
+        var network = new vis.Network(container, data, options);
+    </script>
+    </body>
+    </html>
+    """
+    st.components.v1.html(vis_html, height=440)
+
 
 def render_cyber_graph_ui(enriched_nodes):
     html_elements = ""
@@ -512,7 +623,10 @@ async def master_pipeline_engine(s_id, t_id, pool_manager):
             intel_tasks = [fetch_profile_intel_async(session, uid, pool_manager) for uid in clean_chain]
             enriched_profiles = await asyncio.gather(*intel_tasks)
             with tab1:
-                st.success("### 🎯 Target Chain Intersect Discovered")
+                st.success("### 🎯 Interactive Topological Vector Canvas")
+                render_interactive_topological_graph(enriched_profiles)
+                
+                st.markdown("### 📋 Profile Sequence Data")
                 render_cyber_graph_ui(enriched_profiles)
         else:
             log("[SYSTEM] Swarm complete. No path uncovered.")
