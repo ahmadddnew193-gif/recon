@@ -15,7 +15,7 @@ DB_FILE = "roblox_graph_map.db"
 HF_TOKEN = st.secrets.get("HF_TOKEN")
 HF_REPO_ID = st.secrets.get("HF_REPO_ID")
 
-# Combined Proxy Array: Preserving all 20 proxies from both credentials channels
+# Preserving all 20 proxy configurations
 DEFAULT_PROXIES = """38.154.203.95:5863:zwgfezql:u1o2humd1hr8
 198.105.121.200:6462:zwgfezql:u1o2humd1hr8
 64.137.96.74:6641:zwgfezql:u1o2humd1hr8
@@ -37,9 +37,7 @@ DEFAULT_PROXIES = """38.154.203.95:5863:zwgfezql:u1o2humd1hr8
 142.111.67.146:5611:qquvrrms:c36jtmb5ca0w
 191.96.254.138:6185:qquvrrms:c36jtmb5ca0w"""
 
-
 # --- ADVANCED PROXY POOL HEALTH MANAGER ---
-
 class ProxyPool:
     def __init__(self, raw_proxy_strings):
         self.proxies = self._parse_proxies(raw_proxy_strings)
@@ -72,7 +70,6 @@ class ProxyPool:
                 else:
                     continue
             available.append(p)
-            
         if not available:
             return None
         return random.choice(available)
@@ -80,7 +77,6 @@ class ProxyPool:
     def report_status(self, proxy, status_code):
         if proxy not in self.registry:
             return
-            
         now = time.time()
         if status_code == 200:
             self.registry[proxy]["status"] = "HEALTHY"
@@ -103,8 +99,6 @@ class ProxyPool:
         return healthy, cooling, dead
 
 
-# --- HEURISTIC INTELLIGENCE WEIGHTING ENGINE ---
-
 def calculate_node_priority(node_id, g_cache):
     str_node = str(node_id)
     if str_node in g_cache:
@@ -117,7 +111,6 @@ def calculate_node_priority(node_id, g_cache):
 
 
 # --- SQLITE DATABASE INTEGRITY INFRASTRUCTURE ---
-
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
@@ -134,19 +127,13 @@ def load_persistent_cache():
     init_db()
     if HF_TOKEN and HF_REPO_ID:
         try:
-            resolved_path = hf_hub_download(
-                repo_id=HF_REPO_ID,
-                filename=DB_FILE,
-                repo_type="dataset",
-                token=HF_TOKEN
-            )
+            resolved_path = hf_hub_download(repo_id=HF_REPO_ID, filename=DB_FILE, repo_type="dataset", token=HF_TOKEN)
             if os.path.exists(resolved_path):
                 with open(resolved_path, "rb") as f_src:
                     with open(DB_FILE, "wb") as f_dst:
                         f_dst.write(f_src.read())
         except Exception as e:
             st.sidebar.error(f"⚠️ Initial Cloud Load Skipped: {str(e)}")
-
     memory_cache = {}
     try:
         conn = sqlite3.connect(DB_FILE)
@@ -156,22 +143,17 @@ def load_persistent_cache():
         for row in rows:
             memory_cache[str(row[0])] = json.loads(row[1])
         conn.close()
-    except Exception:
-        pass
+    except Exception: pass
     return memory_cache
 
 def save_single_profile_to_db(user_id, friends_list):
     try:
         conn = sqlite3.connect(DB_FILE, timeout=60.0)
         cursor = conn.cursor()
-        cursor.execute(
-            "INSERT OR REPLACE INTO graph (user_id, friends_list) VALUES (?, ?)",
-            (str(user_id), json.dumps(friends_list))
-        )
+        cursor.execute("INSERT OR REPLACE INTO graph (user_id, friends_list) VALUES (?, ?)", (str(user_id), json.dumps(friends_list)))
         conn.commit()
         conn.close()
-    except Exception:
-        pass
+    except Exception: pass
 
 def sync_entire_memory_to_sqlite():
     try:
@@ -179,70 +161,39 @@ def sync_entire_memory_to_sqlite():
         cursor = conn.cursor()
         cursor.execute("BEGIN TRANSACTION")
         for uid, friends in st.session_state.global_cache.items():
-            cursor.execute(
-                "INSERT OR REPLACE INTO graph (user_id, friends_list) VALUES (?, ?)",
-                (str(uid), json.dumps(friends))
-            )
+            cursor.execute("INSERT OR REPLACE INTO graph (user_id, friends_list) VALUES (?, ?)", (str(uid), json.dumps(friends)))
         conn.commit()
         conn.close()
-    except Exception:
-        pass
-
-
-# --- THREAD-ISOLATED CLOUD LOCK ENGINE ---
+    except Exception: pass
 
 def upload_cache_to_cloud_blocking():
-    if not HF_TOKEN or not HF_REPO_ID:
-        return False, "Configuration credentials missing or invalid."
+    if not HF_TOKEN or not HF_REPO_ID: return False, "Configuration credentials missing or invalid."
     sync_entire_memory_to_sqlite()
-    if not os.path.exists(DB_FILE):
-        return False, "Target database file absent."
+    if not os.path.exists(DB_FILE): return False, "Target database file absent."
     try:
         api = HfApi()
-        api.upload_file(
-            path_or_fileobj=DB_FILE,
-            path_in_repo=DB_FILE,
-            repo_id=HF_REPO_ID,
-            repo_type="dataset",
-            token=HF_TOKEN,
-            commit_message="Automated incremental asynchronous cloud database commit"
-        )
+        api.upload_file(path_or_fileobj=DB_FILE, path_in_repo=DB_FILE, repo_id=HF_REPO_ID, repo_type="dataset", token=HF_TOKEN, commit_message="Automated incremental asynchronous cloud database commit")
         return True, "Success"
-    except Exception as e:
-        return False, str(e)
+    except Exception as e: return False, str(e)
 
 async def upload_cache_to_cloud_async():
-    if "cloud_lock" not in st.session_state:
-        st.session_state.cloud_lock = asyncio.Lock()
-        
+    if "cloud_lock" not in st.session_state: st.session_state.cloud_lock = asyncio.Lock()
     async with st.session_state.cloud_lock:
         success, diagnostics = await asyncio.to_thread(upload_cache_to_cloud_blocking)
-        if not success:
-            st.session_state.logs.append(f"[CLOUD-WARN] Backup delayed: {diagnostics}")
+        if not success: st.session_state.logs.append(f"[CLOUD-WARN] Backup delayed: {diagnostics}")
         return success, diagnostics
 
 
-if "global_cache" not in st.session_state:
-    st.session_state.global_cache = load_persistent_cache()
-if "logs" not in st.session_state:
-    st.session_state.logs = []
-if "running" not in st.session_state:
-    st.session_state.running = False
-if "harvester_running" not in st.session_state:
-    st.session_state.harvester_running = False
-if "seeder_running" not in st.session_state:
-    st.session_state.seeder_running = False
+if "global_cache" not in st.session_state: st.session_state.global_cache = load_persistent_cache()
+if "logs" not in st.session_state: st.session_state.logs = []
+if "running" not in st.session_state: st.session_state.running = False
+if "harvester_running" not in st.session_state: st.session_state.harvester_running = False
+if "seeder_running" not in st.session_state: st.session_state.seeder_running = False
 
 
-# --- HIGH QUALITY RETRO PIXEL SPIDER HARVESTER CANVAS ---
-
+# --- HIGH QUALITY LIVE SPIDER RADAR FEED ---
 def render_live_crawler_spider_canvas(recent_nodes, buffer_size, total_scraped, active_status="ACTIVE"):
-    """
-    Renders an HTML5 Canvas component that features a retro pixel art style
-    spider mapping interface updating via Streamlit state reflection.
-    """
     payload_nodes = [str(n) for n in recent_nodes]
-    
     canvas_html = f"""
     <!DOCTYPE html>
     <html>
@@ -253,12 +204,10 @@ def render_live_crawler_spider_canvas(recent_nodes, buffer_size, total_scraped, 
         </style>
     </head>
     <body>
-        <canvas id="spider-canvas" width="1200" height="400"></canvas>
+        <canvas id="spider-canvas" width="1200" height="300"></canvas>
         <script>
             const canvas = document.getElementById('spider-canvas');
             const ctx = canvas.getContext('2d');
-            
-            // Turn off anti-aliasing to preserve crisp retro pixel vectors
             ctx.imageSmoothingEnabled = false;
 
             const recentNodes = {json.dumps(payload_nodes)};
@@ -267,123 +216,229 @@ def render_live_crawler_spider_canvas(recent_nodes, buffer_size, total_scraped, 
             const engineStatus = "{active_status}";
 
             let radarAngle = 0;
-            let particles = [];
-
-            // Node structure initialization mapping positions spherically around the core nexus
-            let visualNodes = [];
-            
-            // Core central spider node properties
             const coreX = canvas.width / 2;
             const coreY = canvas.height / 2;
+            let visualNodes = [];
 
-            // Generate layout for recent scanned vectors
             recentNodes.forEach((nodeId, index) => {{
-                let angle = (index / Math.max(1, recentNodes.length)) * Math.PI * 2 + (Date.now() * 0.0002);
-                let distance = 110 + (index * 25) % 100;
-                visualNodes.push({{
-                    id: nodeId,
-                    x: coreX + Math.cos(angle) * distance,
-                    y: coreY + Math.sin(angle) * distance,
-                    size: 8 + (parseInt(nodeId) % 6),
-                    pulse: Math.random() * Math.PI
-                }});
+                let angle = (index / Math.max(1, recentNodes.length)) * Math.PI * 2 + (Date.now() * 0.0001);
+                let distance = 90 + (index * 20) % 80;
+                visualNodes.push({{ id: nodeId, x: coreX + Math.cos(angle) * distance, y: coreY + Math.sin(angle) * distance, size: 8, pulse: Math.random() * Math.PI }});
             }});
-
-            function drawPixelGrid() {{
-                ctx.strokeStyle = '#101622';
-                ctx.lineWidth = 1;
-                // Vertical lines
-                for (let x = 0; x < canvas.width; x += 30) {{
-                    ctx.beginPath();
-                    ctx.moveTo(x, 0);
-                    ctx.lineTo(x, canvas.height);
-                    ctx.stroke();
-                }}
-                // Horizontal lines
-                for (let y = 0; y < canvas.height; y += 30) {{
-                    ctx.beginPath();
-                    ctx.moveTo(0, y);
-                    ctx.lineTo(canvas.width, y);
-                    ctx.stroke();
-                }}
-            }}
-
-            function drawPixelBox(x, y, size, color, fill=false) {{
-                ctx.strokeStyle = color;
-                ctx.lineWidth = 2;
-                ctx.strokeRect(x - size/2, y - size/2, size, size);
-                if(fill) {{
-                    ctx.fillStyle = color;
-                    ctx.fillRect(x - size/4, y - size/4, size/2, size/2);
-                }}
-                // Pixel Corner Crosshairs
-                ctx.beginPath();
-                ctx.moveTo(x - size/2 - 4, y); ctx.lineTo(x - size/2 + 1, y);
-                ctx.moveTo(x + size/2 - 1, y); ctx.lineTo(x + size/2 + 4, y);
-                ctx.moveTo(x, y - size/2 - 4); ctx.lineTo(x, y - size/2 + 1);
-                ctx.moveTo(x, y + size/2 - 1); ctx.lineTo(x, y + size/2 + 4);
-                ctx.stroke();
-            }}
 
             function loop() {{
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
                 
-                // Draw foundational cyberpunk matrix grid
-                drawPixelGrid();
+                // Draw background radial grid rows to establish spider web visual anchors
+                ctx.strokeStyle = '#0d151f';
+                ctx.lineWidth = 1;
+                for(let r = 40; r < 300; r += 40) {{
+                    ctx.beginPath(); ctx.arc(coreX, coreY, r, 0, Math.PI*2); ctx.stroke();
+                }}
 
-                // Draw Radar sweeping lines
-                radarAngle += 0.015;
-                ctx.strokeStyle = 'rgba(0, 255, 102, 0.06)';
-                ctx.lineWidth = 3;
-                ctx.beginPath();
-                ctx.moveTo(coreX, coreY);
+                radarAngle += 0.02;
+                ctx.strokeStyle = 'rgba(0, 255, 102, 0.08)';
+                ctx.beginPath(); ctx.moveTo(coreX, coreY);
                 ctx.lineTo(coreX + Math.cos(radarAngle)*600, coreY + Math.sin(radarAngle)*600);
                 ctx.stroke();
 
-                // Connect nodes to Core Hub with digital "spider webs"
                 visualNodes.forEach((node) => {{
                     node.pulse += 0.05;
-                    let currentSize = node.size + Math.sin(node.pulse) * 2;
-                    
                     ctx.strokeStyle = 'rgba(0, 229, 255, 0.4)';
                     ctx.lineWidth = 1;
-                    ctx.setLineDash([4, 4]); // Crisp pixel dashes
-                    ctx.beginPath();
-                    ctx.moveTo(coreX, coreY);
-                    ctx.lineTo(node.x, node.y);
-                    ctx.stroke();
-                    ctx.setLineDash([]); // Reset
+                    ctx.setLineDash([2, 4]);
+                    ctx.beginPath(); ctx.moveTo(coreX, coreY); ctx.lineTo(node.x, node.y); ctx.stroke();
+                    ctx.setLineDash([]);
 
-                    // Draw spider satellite node block
-                    drawPixelBox(node.x, node.y, currentSize, '#00E5FF', true);
-                    
-                    // Render user ID metrics tag under nodes
+                    ctx.fillStyle = '#00E5FF';
+                    ctx.fillRect(node.x - 4, node.y - 4, 8, 8);
                     ctx.fillStyle = '#ffffff';
                     ctx.font = "9px 'Courier New'";
-                    ctx.fillText("ID:" + node.id, node.x - 30, node.y + currentSize + 12);
+                    ctx.fillText("ID:" + node.id, node.x - 25, node.y + 12);
                 }});
 
-                // Central Nexus Array block mapping
-                let corePulse = 24 + Math.sin(Date.now() * 0.005) * 3;
-                drawPixelBox(coreX, coreY, corePulse, '#00FF66', true);
-                
-                // Outer structural shields on Nexus
-                ctx.strokeStyle = '#00FF66';
-                ctx.strokeRect(coreX - corePulse, coreY - corePulse, corePulse*2, corePulse*2);
-
-                // OSINT System Status Overlays inside canvas space
                 ctx.fillStyle = '#00FF66';
-                ctx.font = "bold 12px 'Courier New'";
-                ctx.fillText("📡 SPIDER MATRIX CORE STATUS: [" + engineStatus + "]", 20, 30);
-                
-                ctx.fillStyle = '#00E5FF';
-                ctx.fillText("📦 HARVEST DATA PIPELINE CAPTURED: " + totalScraped + " PROFILES", 20, 50);
-                ctx.fillText("⚡ DISCOVERY BUFFER SIZE: " + bufferSize + " TARGETS IN QUEUE", 20, 70);
+                ctx.fillRect(coreX - 8, coreY - 8, 16, 16);
+                ctx.strokeStyle = '#00FF66';
+                ctx.strokeRect(coreX - 12, coreY - 12, 24, 24);
 
-                // Simulated telemetry code streaming decoration on canvas footer
-                ctx.fillStyle = 'rgba(0, 255, 102, 0.3)';
-                ctx.font = "9px 'Courier New'";
-                ctx.fillText("SWARM_ENGINE_ACTIVE // PROXY_PIPELINE_OK // SYNCING_SQLITE_CACHING_SYS...", 20, canvas.height - 15);
+                ctx.fillStyle = '#00FF66';
+                ctx.font = "bold 11px 'Courier New'";
+                ctx.fillText("📡 SWARM MONITOR: [" + engineStatus + "]", 20, 25);
+                ctx.fillStyle = '#00E5FF';
+                ctx.fillText("📦 CAPTURED: " + totalScraped + " PROFILES | ⚡ BUFFER: " + bufferSize + " TARGETS", 20, 45);
+                requestAnimationFrame(loop);
+            }}
+            loop();
+        </script>
+    </body>
+    </html>
+    """
+    st.components.v1.html(canvas_html, height=315, scrolling=False)
+
+
+# --- DYNAMIC CYBER SPIDER WEB PATH VISUALIZER ---
+def render_spider_web_path_canvas(enriched_nodes):
+    """
+    Transforms sequential user connection steps into a multi-tiered tactical 
+    cyber spider web canvas. No box shapes. Displays nodes distributed along web layers, 
+    with a visual digital spider entity actively crawling through nodes.
+    """
+    nodes_payload = []
+    for idx, node in enumerate(enriched_nodes):
+        nodes_payload.append({
+            "id": str(node["id"]),
+            "name": str(node["name"]),
+            "created": str(node["created"]),
+            "isBanned": bool(node["isBanned"]),
+            "role": "START" if idx == 0 else ("TARGET" if idx == len(enriched_nodes)-1 else f"BRIDGE-{idx}")
+        })
+
+    web_html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <style>
+            body {{ background-color: #04060a; margin: 0; padding: 0; overflow: hidden; font-family: 'Courier New', monospace; }}
+            #web-canvas {{ display: block; border: 2px solid #00E5FF; border-radius: 6px; box-shadow: 0 0 20px rgba(0, 229, 255, 0.2); }}
+        </style>
+    </head>
+    <body>
+        <canvas id="web-canvas" width="1200" height="450"></canvas>
+        <script>
+            const canvas = document.getElementById('web-canvas');
+            const ctx = canvas.getContext('2d');
+            ctx.imageSmoothingEnabled = false;
+
+            const pathNodes = {json.dumps(nodes_payload)};
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+
+            // Mathematical generation mapping positions across a physical spider web spiral matrix
+            let mappedNodes = [];
+            if (pathNodes.length > 0) {{
+                pathNodes.forEach((node, idx) => {{
+                    // Evenly distribute spokes radiantly, changing distance layer outwards
+                    let total = pathNodes.length;
+                    let angle = (idx / total) * Math.PI * 2 - Math.PI/2;
+                    let distance = 60 + (idx * (140 / Math.max(1, total - 1)));
+                    if (total === 1) distance = 0;
+                    
+                    mappedNodes.push({{
+                        ...node,
+                        x: centerX + Math.cos(angle) * distance,
+                        y: centerY + Math.sin(angle) * distance,
+                        angle: angle,
+                        distance: distance
+                    }});
+                }});
+            }}
+
+            // Parameters for tracking the position of the crawling tracking pulse
+            let spiderProgress = 0.0;
+            let currentSegment = 0;
+
+            function drawWebStructure() {{
+                // Draw background radial support web strands
+                ctx.strokeStyle = '#101b2b';
+                ctx.lineWidth = 1;
+                
+                // 1. Structural spokes lines radiating from common nexus core
+                for (let a = 0; a < Math.PI * 2; a += Math.PI / 4) {{
+                    ctx.beginPath(); ctx.moveTo(centerX, centerY);
+                    ctx.lineTo(centerX + Math.cos(a)*300, centerY + Math.sin(a)*300);
+                    ctx.stroke();
+                }}
+
+                // 2. Concentric polygonal ring layers
+                for (let r = 50; r <= 250; r += 50) {{
+                    ctx.beginPath();
+                    for (let i = 0; i <= 8; i++) {{
+                        let a = (i / 8) * Math.PI * 2;
+                        let x = centerX + Math.cos(a) * r;
+                        let y = centerY + Math.sin(a) * r;
+                        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                    }}
+                    ctx.closePath(); ctx.stroke();
+                }}
+            }}
+
+            function loop() {{
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                drawWebStructure();
+
+                if (mappedNodes.length === 0) return;
+
+                // Connect paths sequencially with neon green threads
+                ctx.strokeStyle = 'rgba(0, 255, 102, 0.75)';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                mappedNodes.forEach((node, idx) => {{
+                    if (idx === 0) ctx.moveTo(node.x, node.y);
+                    else ctx.lineTo(node.x, node.y);
+                }});
+                ctx.stroke();
+
+                // Draw Web Intersections (Nodes) as circular vector points
+                mappedNodes.forEach((node, idx) => {{
+                    ctx.beginPath();
+                    ctx.arc(node.x, node.y, 7, 0, Math.PI * 2);
+                    
+                    if (node.role === "START") ctx.fillStyle = '#00FF66';
+                    else if (node.role === "TARGET") ctx.fillStyle = '#FF0055';
+                    else ctx.fillStyle = '#00E5FF';
+                    
+                    if (node.isBanned) ctx.fillStyle = '#7f0000';
+                    ctx.fill();
+
+                    // Node Outer Rings
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath(); ctx.arc(node.x, node.y, 11, 0, Math.PI*2); ctx.stroke();
+
+                    // Text parameters info boxes
+                    ctx.fillStyle = '#ffffff';
+                    ctx.font = "bold 10px 'Courier New'";
+                    ctx.fillText(`[${node.role}] ${node.name}`, node.x + 15, node.y - 4);
+                    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+                    ctx.font = "9px 'Courier New'";
+                    ctx.fillText(`ID: ${node.id}`, node.x + 15, node.y + 7);
+                    if(node.isBanned) {{
+                        ctx.fillStyle = '#FF0055';
+                        ctx.fillText("🚫 BANNED", node.x + 15, node.y + 18);
+                    }}
+                }});
+
+                // ANIMATION LOOP: Glowing Tracker Pulse Crawling Across the Web
+                if (mappedNodes.length > 1) {{
+                    spiderProgress += 0.015;
+                    if (spiderProgress >= 1.0) {{
+                        spiderProgress = 0.0;
+                        currentSegment = (currentSegment + 1) % (mappedNodes.length - 1);
+                    }}
+
+                    let p1 = mappedNodes[currentSegment];
+                    let p2 = mappedNodes[currentSegment + 1];
+
+                    if (p1 && p2) {{
+                        let spiderX = p1.x + (p2.x - p1.x) * spiderProgress;
+                        let spiderY = p1.y + (p2.y - p1.y) * spiderProgress;
+
+                        // Draw animated tracing node spider graphic
+                        ctx.fillStyle = '#00FF66';
+                        ctx.beginPath();
+                        ctx.arc(spiderX, spiderY, 6, 0, Math.PI * 2);
+                        ctx.fill();
+
+                        ctx.strokeStyle = '#00FF66';
+                        ctx.lineWidth = 1;
+                        ctx.beginPath(); ctx.arc(spiderX, spiderY, 14 + Math.sin(Date.now()*0.01)*4, 0, Math.PI * 2); ctx.stroke();
+                    }}
+                }}
+
+                ctx.fillStyle = '#00E5FF';
+                ctx.font = "bold 12px 'Courier New'";
+                ctx.fillText("🕸️ SPIDER PATH MATRIX LAYER GRAPH", 20, 30);
 
                 requestAnimationFrame(loop);
             }}
@@ -392,153 +447,7 @@ def render_live_crawler_spider_canvas(recent_nodes, buffer_size, total_scraped, 
     </body>
     </html>
     """
-    st.components.v1.html(canvas_html, height=415, scrolling=False)
-
-
-# --- INTERACTIVE TOPOLOGICAL GRAPH CANVAS (TAB 1) ---
-
-def render_interactive_topological_graph(enriched_nodes):
-    nodes_js = []
-    edges_js = []
-    g_cache = st.session_state.global_cache
-    node_ids = [int(n["id"]) for n in enriched_nodes]
-    
-    # 1. Compile Node Metadata Properties
-    for idx, node in enumerate(enriched_nodes):
-        uid = int(node["id"])
-        name = node["name"]
-        created = node["created"]
-        is_banned = node["isBanned"]
-        
-        is_endpoint = (idx == 0 or idx == len(enriched_nodes) - 1)
-        role = "START TARGET" if idx == 0 else ("END TARGET" if idx == len(enriched_nodes) - 1 else f"BRIDGE NODE {idx}")
-        
-        is_alt = str(created[:4]) in ["2025", "2026"] and not is_endpoint
-        
-        border_color = "#00E5FF" if is_endpoint else "#FF6D00"
-        bg_color = "#111625" if is_endpoint else "#201612"
-        
-        if is_banned:
-            border_color = "#FF1744"
-        elif is_alt:
-            border_color = "#FF3D00"
-            
-        label = f"{role}\\n{name}\\n({uid})\\nBorn: {created}"
-        if is_banned: label += "\\n🚫 BANNED"
-        if is_alt: label += "\\n⚠️ SUSPECTED ALT"
-        
-        nodes_js.append({
-            "id": uid,
-            "label": label,
-            "shape": "box",
-            "margin": 12,
-            "color": {
-                "background": bg_color,
-                "border": border_color,
-                "highlight": {"background": "#1A233D", "border": "#FFFFFF"}
-            },
-            "font": {"color": "#E0E0E0", "face": "Courier New", "size": 11, "multi": True},
-            "borderWidth": 2
-        })
-        
-    # 2. Add Found Sequential Path Vectors
-    for i in range(len(node_ids) - 1):
-        edges_js.append({
-            "from": node_ids[i],
-            "to": node_ids[i+1],
-            "arrows": "to",
-            "color": {"color": "#00E5FF", "highlight": "#FFFFFF"},
-            "width": 3,
-            "label": "PATH STEP",
-            "font": {"color": "#00E5FF", "face": "Courier New", "size": 9, "align": "top"}
-        })
-        
-    # 3. Dynamic Matrix Scan: Reveal Latent Cluster Relations Between Tracked Nodes
-    for i in range(len(node_ids)):
-        for j in range(len(node_ids)):
-            if i < j and not (i == j - 1):
-                u1, u2 = node_ids[i], node_ids[j]
-                friends_list_1 = g_cache.get(str(u1), [])
-                friends_list_2 = g_cache.get(str(u2), [])
-                
-                if (u2 in friends_list_1) or (u1 in friends_list_2):
-                    edges_js.append({
-                        "from": u1,
-                        "to": u2,
-                        "arrows": "bidirectional",
-                        "color": {"color": "#FF3D00", "highlight": "#FFFFFF"},
-                        "width": 2,
-                        "dashes": True,
-                        "label": "LATENT CROSS-LINK",
-                        "font": {"color": "#FF3D00", "face": "Courier New", "size": 9, "align": "middle"}
-                    })
-                        
-    vis_html = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
-        <style type="text/css">
-            body {{ background-color: #070913; margin: 0; padding: 0; overflow: hidden; }}
-            #network-canvas {{ width: 100vw; height: 420px; background-color: #070913; border: 1px solid #1A1F35; border-radius: 8px; }}
-        </style>
-    </head>
-    <body>
-    <div id="network-canvas"></div>
-    <script type="text/javascript">
-        var nodes = new vis.DataSet({json.dumps(nodes_js)});
-        var edges = new vis.DataSet({json.dumps(edges_js)});
-        var container = document.getElementById('network-canvas');
-        var data = {{ nodes: nodes, edges: edges }};
-        var options = {{
-            physics: {{
-                enabled: true,
-                barnesHut: {{ gravitationalConstant: -2200, centralGravity: 0.25, springLength: 160, springConstant: 0.04, damping: 0.09 }},
-                stabilization: {{ iterations: 120 }}
-            }},
-            interaction: {{ hover: true, zoomView: true, dragView: true }}
-        }};
-        var network = new vis.Network(container, data, options);
-    </script>
-    </body>
-    </html>
-    """
-    st.components.v1.html(vis_html, height=440)
-
-
-def render_cyber_graph_ui(enriched_nodes):
-    html_elements = ""
-    for idx, node in enumerate(enriched_nodes):
-        is_endpoint = (idx == 0 or idx == len(enriched_nodes) - 1)
-        bg_color = "#111625" if is_endpoint else "#201612"
-        border_color = "#00E5FF" if is_endpoint else "#FF6D00"
-        text_color = "#E0E0E0"
-        
-        created_year = node["created"][:4]
-        is_suspected_alt = str(created_year) in ["2025", "2026"] and not is_endpoint
-        alt_badge = """<div style="color: #FF3D00; font-size: 10px; margin-top: 4px; font-weight: bold;">⚠️ SUSPECTED ALT</div>""" if is_suspected_alt else ""
-        banned_badge = """<div style="color: #FF1744; font-size: 10px; margin-top: 4px; font-weight: bold;">🚫 BANNED</div>""" if node["isBanned"] else ""
-
-        role_label = "START TARGET" if idx == 0 else ("END TARGET" if idx == len(enriched_nodes) - 1 else f"BRIDGE NODE {idx}")
-
-        html_elements += f"""
-        <div style="display: flex; align-items: center; margin: 10px 0;">
-            <div style="background-color: {bg_color}; border: 1px solid {border_color}; 
-                        padding: 14px; border-radius: 6px; color: {text_color}; 
-                        font-family: 'Courier New', monospace; min-width: 170px; text-align: left;">
-                <div style="font-size: 9px; color: {border_color}; font-weight: bold; letter-spacing: 1px;">{role_label}</div>
-                <div style="font-size: 14px; margin-top: 4px; font-weight: bold; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{node['name']}</div>
-                <div style="font-size: 11px; opacity: 0.6; margin-top: 2px;">ID: {node['id']}</div>
-                <div style="font-size: 10px; opacity: 0.5; margin-top: 4px;">Born: {node['created']}</div>
-                {alt_badge}
-                {banned_badge}
-            </div>
-        """
-        if idx < len(enriched_nodes) - 1:
-            html_elements += """<div style="padding: 0 12px; color: #00E5FF; font-size: 20px; font-weight: bold; font-family: monospace;">➔</div>"""
-            
-    full_container = f"""<div style="display: flex; flex-wrap: wrap; align-items: center; padding: 15px; background-color: #070913; border-radius: 8px; border: 1px solid #1A1F35; margin-bottom: 20px;">{html_elements}</div>"""
-    st.components.v1.html(full_container, height=160, scrolling=True)
+    st.components.v1.html(web_html, height=465, scrolling=False)
 
 
 with st.sidebar:
@@ -552,18 +461,14 @@ with st.sidebar:
         st.caption(f"Linked Repo: `{HF_REPO_ID}`")
         if st.button("🔄 Force Push DB to Cloud", use_container_width=True):
             success, error_msg = upload_cache_to_cloud_blocking()
-            if success:
-                st.toast("Database backed up successfully!", icon="🚀")
-                st.rerun()
-            else:
-                st.error(f"💥 Transfer Dropped: {error_msg}")
-    else:
-        st.warning("⚠️ Running in Local-Only Mode.")
+            if success: st.toast("Database backed up successfully!", icon="🚀")
+            else: st.error(f"💥 Transfer Dropped: {error_msg}")
+    else: st.warning("⚠️ Running in Local-Only Mode.")
 
-tab1, tab2, tab3 = st.tabs(["🚀 Graph Path Tracer", "🌍 Real Mass Harvester", "📦 Roblox Backbone Seeder & Tools"])
+tab1, tab2, tab3 = st.tabs(["🚀 Graph Path Tracer & Swarm Feed", "🌍 Real Mass Harvester", "📦 Roblox Backbone Seeder & Tools"])
 
 # ==========================================
-# TAB 1: GRAPH PATHFINDER CORE
+# TAB 1: INTEGRATED CORE PIPELINE ENGINE (FIXED PLACEHOLDERS)
 # ==========================================
 with tab1:
     st.subheader("Dual-Queue Target Analysis Execution (Informed Best-First Engine)")
@@ -580,17 +485,33 @@ with tab1:
         st.session_state.running = False
         st.rerun()
 
-    console_placeholder = st.empty()
+    # Dynamic thread-isolated execution placeholders bound to Tab 1
     status_placeholder = st.empty()
+    console_placeholder = st.empty()
     group_placeholder = st.empty()
+    
+    st.markdown("### 📡 Live Feed Discovery Monitor")
+    live_feed_placeholder = st.empty()
+    
+    st.markdown("### 🕸️ Visual Network Web Results")
+    graph_placeholder = st.empty()
+
+    # Initial static placeholders state definitions
+    live_feed_placeholder.markdown("*(Engine Idle - Launch swarm pipeline to stream metrics data)*")
+    graph_placeholder.markdown("*(No active cross-path mapping processed yet)*")
+
+# Background thread logging assistant mapping
+def print_thread_safe_log(msg):
+    st.session_state.logs.append(msg)
+    if len(st.session_state.logs) > 12: st.session_state.logs.pop(0)
+    console_placeholder.code("\n".join(st.session_state.logs), language="bash")
 
 async def cache_processor_task(network_queue, cache_queue, start_visited, target_visited, path_found_event, results_container):
     g_cache = st.session_state.global_cache
     while not path_found_event.is_set() and st.session_state.running:
-        try:
-            score, (direction, node) = cache_queue.get_nowait()
+        try: score, (direction, node) = cache_queue.get_nowait()
         except asyncio.QueueEmpty:
-            await asyncio.sleep(0.001)
+            await asyncio.sleep(0.002)
             continue
             
         str_node = str(node)
@@ -623,17 +544,16 @@ async def cache_processor_task(network_queue, cache_queue, start_visited, target
                     if str(friend_int) in g_cache: cache_queue.put_nowait((f_score, ("REVERSE", friend_int)))
                     else: network_queue.put_nowait((f_score, ("REVERSE", friend_int)))
 
-async def proxy_worker_task(worker_id, pool_manager, network_queue, cache_queue, start_visited, target_visited, session, path_found_event, results_container, log_func):
+async def proxy_worker_task(worker_id, pool_manager, network_queue, cache_queue, start_visited, target_visited, session, path_found_event, results_container):
     g_cache = st.session_state.global_cache
     
     while not path_found_event.is_set() and st.session_state.running:
         proxy = pool_manager.get_healthy_proxy()
         if not proxy:
-            await asyncio.sleep(2.0)
+            await asyncio.sleep(1.5)
             continue
             
-        try:
-            score, (direction, node) = network_queue.get_nowait()
+        try: score, (direction, node) = network_queue.get_nowait()
         except asyncio.QueueEmpty:
             await asyncio.sleep(0.02)
             continue
@@ -662,6 +582,11 @@ async def proxy_worker_task(worker_id, pool_manager, network_queue, cache_queue,
                     save_single_profile_to_db(str_node, friends)
                     results_container["new_discoveries"][str_node] = friends
                     
+                    # Store tracking profile arrays for live feed pipeline metrics
+                    results_container["rolling_window"].append(node)
+                    if len(results_container["rolling_window"]) > 7:
+                        results_container["rolling_window"].pop(0)
+                    
                     for friend in friends:
                         f_score = calculate_node_priority(friend, g_cache)
                         if direction == "FORWARD":
@@ -682,7 +607,7 @@ async def proxy_worker_task(worker_id, pool_manager, network_queue, cache_queue,
                                 target_visited[friend] = current_path + [friend]
                                 if str(friend) in g_cache: cache_queue.put_nowait((f_score, ("REVERSE", friend)))
                                 else: network_queue.put_nowait((f_score, ("REVERSE", friend)))
-                    await asyncio.sleep(0.1)
+                    await asyncio.sleep(0.05)
                 else:
                     network_queue.put_nowait((score, (direction, node)))
         except Exception:
@@ -700,21 +625,19 @@ async def fetch_user_groups_async(session, user_id, pool_manager):
     except Exception: pass
     return {}
 
-async def execute_group_intersection_scan(session, s_id, t_id, pool_manager, placeholder):
-    shared_ids = set()
+async def execute_group_intersection_scan(session, s_id, t_id, pool_manager):
     s_groups, t_groups = await asyncio.gather(
         fetch_user_groups_async(session, s_id, pool_manager),
         fetch_user_groups_async(session, t_id, pool_manager)
     )
     if s_groups and t_groups:
         shared_ids = set(s_groups.keys()).intersection(set(t_groups.keys()))
-    with placeholder:
         if shared_ids:
-            st.warning(f"🎯 Direct Group Vector Detected! Found {len(shared_ids)} shared groups:")
-            for gid in shared_ids:
-                st.markdown(f"• **Group:** {s_groups[gid]} `(ID: {gid})` ➔ [View](https://www.roblox.com/groups/{gid})")
-        else:
-            st.info("ℹ️ No directly shared structural Roblox Group vectors identified.")
+            msg = f"🎯 Shared Roblox Group Intersections Detected ({len(shared_ids)} links):\n"
+            for gid in shared_ids: msg += f" • [ID: {gid}] {s_groups[gid]}\n"
+            group_placeholder.warning(msg)
+            return
+    group_placeholder.info("ℹ️ No immediate target intersection discovered in layer-1 groups.")
 
 async def fetch_profile_intel_async(session, user_id, pool_manager):
     user_url = f"https://users.roblox.com/v1/users/{user_id}"
@@ -739,34 +662,30 @@ async def master_pipeline_engine(s_id, t_id, pool_manager):
     
     if str(s_id) in g_cache: cache_queue.put_nowait((s_score, ("FORWARD", s_id)))
     else: network_queue.put_nowait((s_score, ("FORWARD", s_id)))
-        
     if str(t_id) in g_cache: cache_queue.put_nowait((t_score, ("REVERSE", t_id)))
     else: network_queue.put_nowait((t_score, ("REVERSE", t_id)))
         
     path_found_event = asyncio.Event()
-    results_container = {"final_chain": [], "api_calls": 0, "cache_hits": 0, "new_discoveries": {}}
+    results_container = {"final_chain": [], "api_calls": 0, "cache_hits": 0, "new_discoveries": {}, "rolling_window": []}
 
-    def log(msg):
-        st.session_state.logs.append(msg)
-        if len(st.session_state.logs) > 20: st.session_state.logs.pop(0)
-        with tab1: console_placeholder.code("\n".join(st.session_state.logs), language="bash")
-
-    log("[SYSTEM] Coordinating proxy health pools. Swarming pipeline arrays...")
+    print_thread_safe_log("[SYSTEM] Re-routing swarm arrays to Thread-Safe placeholders...")
 
     async with aiohttp.ClientSession() as session:
-        asyncio.create_task(execute_group_intersection_scan(session, s_id, t_id, pool_manager, group_placeholder))
+        asyncio.create_task(execute_group_intersection_scan(session, s_id, t_id, pool_manager))
         
         workers = [asyncio.create_task(cache_processor_task(network_queue, cache_queue, start_visited, target_visited, path_found_event, results_container))]
         for idx in range(8):
-            workers.append(asyncio.create_task(proxy_worker_task(idx + 1, pool_manager, network_queue, cache_queue, start_visited, target_visited, session, path_found_event, results_container, log)))
+            workers.append(asyncio.create_task(proxy_worker_task(idx + 1, pool_manager, network_queue, cache_queue, start_visited, target_visited, session, path_found_event, results_container)))
 
         while not path_found_event.is_set() and st.session_state.running:
             h, c, d = pool_manager.get_pool_diagnostics()
-            with tab1:
-                status_placeholder.info(
-                    f"🟢 Healthy Proxies: {h} | 🟡 Cooling: {c} | 🔴 Dead: {d} | "
-                    f"⚡ Cache Hits: {results_container['cache_hits']} | 🌐 Total Outbound Requests: {results_container['api_calls']}"
-                )
+            q_total = network_queue.qsize() + cache_queue.qsize()
+            
+            status_placeholder.info(f"🟢 Active Proxies: {h} | 🟡 Cool Down: {c} | 🔴 Dead Pool: {d} | ⚡ Cache Hits: {results_container['cache_hits']} | Outbound Net: {results_container['api_calls']}")
+            
+            # Safely stream telemetry straight to the newly added spider live canvas feed in Tab 1
+            with live_feed_placeholder:
+                render_live_crawler_spider_canvas(results_container["rolling_window"], q_total, results_container["cache_hits"] + results_container["api_calls"], active_status="SWARMING")
             await asyncio.sleep(0.2)
 
         path_found_event.set()
@@ -780,18 +699,28 @@ async def master_pipeline_engine(s_id, t_id, pool_manager):
             for u in results_container["final_chain"]:
                 if not clean_chain or clean_chain[-1] != u: clean_chain.append(u)
                 
-            log("[SUCCESS] Path mapping linked. Compiling targets...")
+            print_thread_safe_log(f"[SUCCESS] Linked path connection chain matrix: {clean_chain}")
             intel_tasks = [fetch_profile_intel_async(session, uid, pool_manager) for uid in clean_chain]
             enriched_profiles = await asyncio.gather(*intel_tasks)
-            with tab1:
-                st.success("### 🎯 Interactive Topological Vector Canvas")
-                render_interactive_topological_graph(enriched_profiles)
-                
-                st.markdown("### 📋 Profile Sequence Data")
-                render_cyber_graph_ui(enriched_profiles)
+            
+            # Update the custom HTML5 Canvas showing the structured Spider Web configuration
+            with graph_placeholder:
+                render_spider_web_path_canvas(enriched_profiles)
         else:
-            log("[SYSTEM] Swarm complete. No path uncovered.")
+            print_thread_safe_log("[SYSTEM] Processing complete. No link uncovered between targets.")
+            graph_placeholder.error("❌ Deep network scan yielded no relational bridge paths.")
+        
         st.session_state.running = False
+
+if start_btn and s_input.isdigit() and t_input.isdigit():
+    pool_mgr = ProxyPool(proxy_input)
+    if pool_mgr.proxies:
+        st.session_state.running = True
+        st.session_state.harvester_running = False
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(master_pipeline_engine(int(s_input), int(t_input), pool_mgr))
+        st.rerun()
 
 
 # ==========================================
@@ -802,37 +731,28 @@ with tab2:
     st.write("Drives automated background harvesting across healthy proxy pipelines.")
     
     hc1, hc2 = st.columns(2)
-    with hc1: seed_id_input = st.text_input("Harvester Seed User ID (Start Node):", "1703896246")
-    with hc2: max_harvest = st.number_input("Max Users to Scrape Before Auto-Stop:", min_value=100, max_value=100000, value=2000, step=500)
+    with hc1: seed_id_input = st.text_input("Harvester Seed User ID (Start Node):", "1703896246", key="harvest_seed")
+    with hc2: max_harvest = st.number_input("Max Users to Scrape Before Auto-Stop:", min_value=100, max_value=100000, value=2000, step=500, key="harvest_max")
         
     hbtn1, hbtn2 = st.columns(2)
-    with hbtn1: start_harvest_btn = st.button("⚡ Ignite High-Speed Crawler", use_container_width=True, type="primary")
-    with hbtn2: stop_harvest_btn = st.button("🛑 Force Stop Harvester", use_container_width=True)
+    with hbtn1: start_harvest_btn = st.button("⚡ Ignite High-Speed Crawler", use_container_width=True, type="primary", key="harvest_start")
+    with hbtn2: stop_harvest_btn = st.button("🛑 Force Stop Harvester", use_container_width=True, key="harvest_stop")
         
     if stop_harvest_btn:
         st.session_state.harvester_running = False
         st.rerun()
         
-    # Render static baseline canvas container when idle
-    canvas_placeholder = st.empty()
-    if not st.session_state.harvester_running:
-        with canvas_placeholder:
-            render_live_crawler_spider_canvas([], 0, 0, active_status="OFFLINE")
-
     harvest_console = st.empty()
     harvest_status = st.empty()
 
 async def harvester_spider_worker(worker_id, pool_manager, harvest_queue, shared_stats, session):
     g_cache = st.session_state.global_cache
-    
     while st.session_state.harvester_running and shared_stats["scraped_count"] < shared_stats["limit"]:
         proxy = pool_manager.get_healthy_proxy()
         if not proxy:
             await asyncio.sleep(2.0)
             continue
-            
-        try:
-            user_id = harvest_queue.get_nowait()
+        try: user_id = harvest_queue.get_nowait()
         except asyncio.QueueEmpty:
             await asyncio.sleep(0.05)
             continue
@@ -848,7 +768,6 @@ async def harvester_spider_worker(worker_id, pool_manager, harvest_queue, shared
             async with session.get(url, proxy=proxy, timeout=5) as response:
                 shared_stats["total_api_calls"] += 1
                 pool_manager.report_status(proxy, response.status)
-                
                 if response.status == 200:
                     data = await response.json()
                     friends = [int(f["id"]) for f in data.get("data", []) if not f.get("isDeleted", False)]
@@ -859,11 +778,6 @@ async def harvester_spider_worker(worker_id, pool_manager, harvest_queue, shared
                     shared_stats["scraped_count"] += 1
                     shared_stats["uncommitted_records"] += 1
                     
-                    # Track a rolling window of recent profile hits to stream directly into the live pixel canvas
-                    shared_stats["rolling_window"].append(user_id)
-                    if len(shared_stats["rolling_window"]) > 8:
-                        shared_stats["rolling_window"].pop(0)
-                    
                     if shared_stats["uncommitted_records"] >= 50:
                         shared_stats["uncommitted_records"] = 0
                         asyncio.create_task(upload_cache_to_cloud_async())
@@ -871,8 +785,7 @@ async def harvester_spider_worker(worker_id, pool_manager, harvest_queue, shared
                     for friend in friends:
                         if str(friend) not in g_cache: harvest_queue.put_nowait(friend)
                     await asyncio.sleep(0.1)
-                else:
-                    harvest_queue.put_nowait(user_id)
+                else: harvest_queue.put_nowait(user_id)
         except Exception:
             pool_manager.report_status(proxy, 0)
             harvest_queue.put_nowait(user_id)
@@ -880,38 +793,14 @@ async def harvester_spider_worker(worker_id, pool_manager, harvest_queue, shared
 async def master_harvester_coordinator(seed_uid, max_profiles, pool_manager):
     harvest_queue = asyncio.Queue()
     harvest_queue.put_nowait(seed_uid)
-    shared_stats = {
-        "scraped_count": 0, 
-        "limit": max_profiles, 
-        "total_api_calls": 0, 
-        "uncommitted_records": 0,
-        "rolling_window": []
-    }
+    shared_stats = {"scraped_count": 0, "limit": max_profiles, "total_api_calls": 0, "uncommitted_records": 0}
     
     async with aiohttp.ClientSession() as session:
-        workers = []
-        for idx in range(6):
-            workers.append(asyncio.create_task(harvester_spider_worker(idx+1, pool_manager, harvest_queue, shared_stats, session)))
-            
+        workers = [asyncio.create_task(harvester_spider_worker(idx+1, pool_manager, harvest_queue, shared_stats, session)) for idx in range(6)]
         while st.session_state.harvester_running and shared_stats["scraped_count"] < max_profiles:
             h, c, d = pool_manager.get_pool_diagnostics()
-            q_size = harvest_queue.qsize()
-            
-            with tab2:
-                # Dynamically update the high-performance pixel-art radar dashboard canvas every loop iteration
-                with canvas_placeholder:
-                    render_live_crawler_spider_canvas(
-                        shared_stats["rolling_window"], 
-                        q_size, 
-                        shared_stats["scraped_count"], 
-                        active_status="RUNNING"
-                    )
-                
-                harvest_status.success(
-                    f"🚀 Crawl Active | Live Channels: H:{h} C:{c} D:{d} | "
-                    f"📂 Profiles Scraped: {shared_stats['scraped_count']} / {max_profiles}"
-                )
-                harvest_console.code(f"Queue Discovery Buffer Size: {q_size} targets waiting.", language="bash")
+            harvest_status.success(f"🚀 Background Crawl Active | Live Channels: H:{h} C:{c} D:{d} | Profiles Scraped: {shared_stats['scraped_count']} / {max_profiles}")
+            harvest_console.code(f"Queue Discovery Buffer Size: {harvest_queue.qsize()} targets waiting.", language="bash")
             await asyncio.sleep(1.0)
             
         st.session_state.harvester_running = False
@@ -945,12 +834,12 @@ with tab3:
     }
     
     selected_hubs = st.multiselect("Select Core Roblox Hubs to Map:", list(famous_hubs.keys()), default=list(famous_hubs.keys())[:3])
-    custom_seed_list = st.text_input("Append Extra Custom Roblox Hub UIDs:")
-    max_layer2_nodes = st.number_input("Max Layer-2 Profiles to Swarm:", min_value=10, max_value=2000, value=250, step=50)
+    custom_seed_list = st.text_input("Append Extra Custom Roblox Hub UIDs:", key="seeder_custom")
+    max_layer2_nodes = st.number_input("Max Layer-2 Profiles to Swarm:", min_value=10, max_value=2000, value=250, step=50, key="seeder_max")
         
     s_col1, s_col2 = st.columns(2)
-    with s_col1: ignite_seed = st.button("🔥 Ignite 2-Layer Backbone Swarm", use_container_width=True, type="primary")
-    with s_col2: kill_seed = st.button("🛑 Force Stop Seeder Swarm", use_container_width=True)
+    with s_col1: ignite_seed = st.button("🔥 Ignite 2-Layer Backbone Swarm", use_container_width=True, type="primary", key="seeder_start")
+    with s_col2: kill_seed = st.button("🛑 Force Stop Seeder Swarm", use_container_width=True, key="seeder_stop")
         
     if kill_seed:
         st.session_state.seeder_running = False
@@ -979,8 +868,7 @@ with tab3:
                     save_single_profile_to_db(str_uid, friends)
                     shared_metrics["saved_nodes"] += 1
                     return friends
-        except Exception:
-            pool_manager.report_status(proxy, 0)
+        except Exception: pool_manager.report_status(proxy, 0)
         return []
 
     async def run_deep_hub_seeder(primary_uids, pool_manager, max_l2):
@@ -988,9 +876,7 @@ with tab3:
         g_cache = st.session_state.global_cache
         
         async with aiohttp.ClientSession() as session:
-            shared_metrics["current_target"] = f"Mapping {len(primary_uids)} core seeds..."
             layer2_queue = []
-            
             for uid in primary_uids:
                 if not st.session_state.seeder_running: break
                 friends = await seed_worker_pipeline(uid, pool_manager, session, shared_metrics)
@@ -1001,31 +887,24 @@ with tab3:
             random.shuffle(layer2_queue)
             layer2_targets = layer2_queue[:max_l2]
             
-            shared_metrics["current_target"] = f"Cascading down to {len(layer2_targets)} secondary targets..."
-            
             for idx, l2_uid in enumerate(layer2_targets):
                 if not st.session_state.seeder_running: break
                 h, c, d = pool_manager.get_pool_diagnostics()
-                with tab3:
-                    seeder_status.info(f"⚡ Swarm Working | Channels: H:{h} C:{c} D:{d} | Cached: {shared_metrics['saved_nodes']}")
-                    seeder_console.code(f"Phase: {shared_metrics['current_target']}\nVector [{idx + 1}/{len(layer2_targets)}]: UID {l2_uid}", language="bash")
+                seeder_status.info(f"⚡ Swarm Working | Channels: H:{h} C:{c} D:{d} | Cached: {shared_metrics['saved_nodes']}")
+                seeder_console.code(f"Vector [{idx + 1}/{len(layer2_targets)}]: UID {l2_uid}", language="bash")
                 
                 await seed_worker_pipeline(l2_uid, pool_manager, session, shared_metrics)
                 await asyncio.sleep(0.1)
-                
-                if shared_metrics["saved_nodes"] % 25 == 0:
-                    await upload_cache_to_cloud_async()
+                if shared_metrics["saved_nodes"] % 25 == 0: await upload_cache_to_cloud_async()
                     
             await upload_cache_to_cloud_async()
             st.session_state.seeder_running = False
-            st.success("🎉 Deep Social Highway established completely!")
 
     if ignite_seed:
         target_uids = [famous_hubs[name] for name in selected_hubs]
         if custom_seed_list.strip():
             for c_id in custom_seed_list.split(","):
                 if c_id.strip().isdigit(): target_uids.append(int(c_id.strip()))
-                
         pool_mgr = ProxyPool(proxy_input)
         if target_uids and pool_mgr.proxies:
             st.session_state.seeder_running = True
@@ -1034,13 +913,13 @@ with tab3:
             loop.run_until_complete(run_deep_hub_seeder(target_uids, pool_mgr, int(max_layer2_nodes)))
             st.rerun()
 
-    # --- SYNTHETIC SEEDER PANEL ---
+    # --- SIMULATED DATA UTILITY ---
     st.markdown("---")
     st.subheader("📦 Fake Local Data Mock-Generator")
-    seed_start = st.text_input("Simulate Start ID Entry:", value="1703896246")
-    seed_target = st.text_input("Simulate Target ID Entry:", value="140671171")
-    profile_volume = st.number_input("Background Density Nodes:", min_value=100, max_value=50000, value=5000, step=500)
-    generate_btn = st.button("⚡ Execute Mock Seeding", use_container_width=True)
+    seed_start = st.text_input("Simulate Start ID Entry:", value="1703896246", key="mock_s")
+    seed_target = st.text_input("Simulate Target ID Entry:", value="140671171", key="mock_t")
+    profile_volume = st.number_input("Background Density Nodes:", min_value=100, max_value=50000, value=5000, step=500, key="mock_vol")
+    generate_btn = st.button("⚡ Execute Mock Seeding", use_container_width=True, key="mock_gen")
     
     if generate_btn and seed_start.isdigit() and seed_target.isdigit():
         database = {}
@@ -1051,50 +930,21 @@ with tab3:
         database[str(hub_b)] = [hub_a, hub_c]
         database[str(hub_c)] = [hub_b, t_id_int]
         database[str(t_id_int)] = [hub_c]
+        
         filler_ids = [random.randint(2000000, 8000000) for _ in range(int(profile_volume))]
         for uid in filler_ids:
             str_uid = str(uid)
             if str_uid not in database: database[str_uid] = []
             database[str_uid].extend(random.sample(filler_ids, k=min(random.randint(15, 40), len(filler_ids))))
+            
         database[str(s_id_int)].extend(random.sample(filler_ids, k=20))
         database[str(hub_a)].extend(random.sample(filler_ids, k=25))
         database[str(hub_b)].extend(random.sample(filler_ids, k=25))
         database[str(hub_c)].extend(random.sample(filler_ids, k=25))
         database[str(t_id_int)].extend(random.sample(filler_ids, k=20))
+        
         for key in database: database[key] = list(set([int(x) for x in database[key] if int(x) != int(key)]))
         st.session_state.global_cache = database
         upload_cache_to_cloud_blocking()
         st.success("✅ Mock Database Seeded!")
         st.rerun()
-
-    # --- DATABASE MAINTENANCE PANELS ---
-    st.markdown("---")
-    st.subheader("🧹 Database Maintenance & Purge Utilities")
-    m_col1, m_col2 = st.columns(2)
-    with m_col1:
-        wipe_all_btn = st.button("💥 Wipe Entire Cache File & Memory", use_container_width=True, type="secondary")
-        if wipe_all_btn:
-            st.session_state.global_cache = {}
-            if os.path.exists(DB_FILE):
-                try: os.remove(DB_FILE)
-                except Exception: pass
-            init_db()
-            upload_cache_to_cloud_blocking()
-            st.success("💥 Database dropped!")
-            st.rerun()
-            
-    with m_col2:
-        purge_hubs_btn = st.button("🧩 Scrub Mock Tracing Hubs Only", use_container_width=True)
-        if purge_hubs_btn:
-            g_cache = st.session_state.global_cache
-            mock_hubs = ["999101", "999102", "999103"]
-            nodes_altered = 0
-            for h_id in mock_hubs:
-                if h_id in g_cache: del g_cache[h_id]; nodes_altered += 1
-            for key in list(g_cache.keys()):
-                orig_list = g_cache[key]
-                cleaned_list = [x for x in orig_list if str(x) not in mock_hubs]
-                if len(cleaned_list) != len(orig_list): g_cache[key] = cleaned_list; nodes_altered += 1
-            upload_cache_to_cloud_blocking()
-            st.success(f"✅ Scrubbed reference matrices! Removed {nodes_altered} links.")
-            st.rerun()
