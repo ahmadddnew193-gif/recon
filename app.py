@@ -234,7 +234,168 @@ if "seeder_running" not in st.session_state:
     st.session_state.seeder_running = False
 
 
-# --- FINAL BEST FEATURE: TOPOLOGICAL INTERACTIVE CANVAS LAYOUT ENGINE ---
+# --- HIGH QUALITY RETRO PIXEL SPIDER HARVESTER CANVAS ---
+
+def render_live_crawler_spider_canvas(recent_nodes, buffer_size, total_scraped, active_status="ACTIVE"):
+    """
+    Renders an HTML5 Canvas component that features a retro pixel art style
+    spider mapping interface updating via Streamlit state reflection.
+    """
+    payload_nodes = [str(n) for n in recent_nodes]
+    
+    canvas_html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <style>
+            body {{ background-color: #05070f; margin: 0; padding: 0; overflow: hidden; font-family: 'Courier New', monospace; }}
+            #spider-canvas {{ display: block; background: #05070f; border: 2px solid #00FF66; border-radius: 6px; box-shadow: 0 0 15px rgba(0, 255, 102, 0.15); }}
+        </style>
+    </head>
+    <body>
+        <canvas id="spider-canvas" width="1200" height="400"></canvas>
+        <script>
+            const canvas = document.getElementById('spider-canvas');
+            const ctx = canvas.getContext('2d');
+            
+            // Turn off anti-aliasing to preserve crisp retro pixel vectors
+            ctx.imageSmoothingEnabled = false;
+
+            const recentNodes = {json.dumps(payload_nodes)};
+            const bufferSize = {buffer_size};
+            const totalScraped = {total_scraped};
+            const engineStatus = "{active_status}";
+
+            let radarAngle = 0;
+            let particles = [];
+
+            // Node structure initialization mapping positions spherically around the core nexus
+            let visualNodes = [];
+            
+            // Core central spider node properties
+            const coreX = canvas.width / 2;
+            const coreY = canvas.height / 2;
+
+            // Generate layout for recent scanned vectors
+            recentNodes.forEach((nodeId, index) => {{
+                let angle = (index / Math.max(1, recentNodes.length)) * Math.PI * 2 + (Date.now() * 0.0002);
+                let distance = 110 + (index * 25) % 100;
+                visualNodes.push({{
+                    id: nodeId,
+                    x: coreX + Math.cos(angle) * distance,
+                    y: coreY + Math.sin(angle) * distance,
+                    size: 8 + (parseInt(nodeId) % 6),
+                    pulse: Math.random() * Math.PI
+                }});
+            }});
+
+            function drawPixelGrid() {{
+                ctx.strokeStyle = '#101622';
+                ctx.lineWidth = 1;
+                // Vertical lines
+                for (let x = 0; x < canvas.width; x += 30) {{
+                    ctx.beginPath();
+                    ctx.moveTo(x, 0);
+                    ctx.lineTo(x, canvas.height);
+                    ctx.stroke();
+                }}
+                // Horizontal lines
+                for (let y = 0; y < canvas.height; y += 30) {{
+                    ctx.beginPath();
+                    ctx.moveTo(0, y);
+                    ctx.lineTo(canvas.width, y);
+                    ctx.stroke();
+                }}
+            }}
+
+            function drawPixelBox(x, y, size, color, fill=false) {{
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 2;
+                ctx.strokeRect(x - size/2, y - size/2, size, size);
+                if(fill) {{
+                    ctx.fillStyle = color;
+                    ctx.fillRect(x - size/4, y - size/4, size/2, size/2);
+                }}
+                // Pixel Corner Crosshairs
+                ctx.beginPath();
+                ctx.moveTo(x - size/2 - 4, y); ctx.lineTo(x - size/2 + 1, y);
+                ctx.moveTo(x + size/2 - 1, y); ctx.lineTo(x + size/2 + 4, y);
+                ctx.moveTo(x, y - size/2 - 4); ctx.lineTo(x, y - size/2 + 1);
+                ctx.moveTo(x, y + size/2 - 1); ctx.lineTo(x, y + size/2 + 4);
+                ctx.stroke();
+            }}
+
+            function loop() {{
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                // Draw foundational cyberpunk matrix grid
+                drawPixelGrid();
+
+                // Draw Radar sweeping lines
+                radarAngle += 0.015;
+                ctx.strokeStyle = 'rgba(0, 255, 102, 0.06)';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(coreX, coreY);
+                ctx.lineTo(coreX + Math.cos(radarAngle)*600, coreY + Math.sin(radarAngle)*600);
+                ctx.stroke();
+
+                // Connect nodes to Core Hub with digital "spider webs"
+                visualNodes.forEach((node) => {{
+                    node.pulse += 0.05;
+                    let currentSize = node.size + Math.sin(node.pulse) * 2;
+                    
+                    ctx.strokeStyle = 'rgba(0, 229, 255, 0.4)';
+                    ctx.lineWidth = 1;
+                    ctx.setLineDash([4, 4]); // Crisp pixel dashes
+                    ctx.beginPath();
+                    ctx.moveTo(coreX, coreY);
+                    ctx.lineTo(node.x, node.y);
+                    ctx.stroke();
+                    ctx.setLineDash([]); // Reset
+
+                    // Draw spider satellite node block
+                    drawPixelBox(node.x, node.y, currentSize, '#00E5FF', true);
+                    
+                    // Render user ID metrics tag under nodes
+                    ctx.fillStyle = '#ffffff';
+                    ctx.font = "9px 'Courier New'";
+                    ctx.fillText("ID:" + node.id, node.x - 30, node.y + currentSize + 12);
+                }});
+
+                // Central Nexus Array block mapping
+                let corePulse = 24 + Math.sin(Date.now() * 0.005) * 3;
+                drawPixelBox(coreX, coreY, corePulse, '#00FF66', true);
+                
+                // Outer structural shields on Nexus
+                ctx.strokeStyle = '#00FF66';
+                ctx.strokeRect(coreX - corePulse, coreY - corePulse, corePulse*2, corePulse*2);
+
+                // OSINT System Status Overlays inside canvas space
+                ctx.fillStyle = '#00FF66';
+                ctx.font = "bold 12px 'Courier New'";
+                ctx.fillText("📡 SPIDER MATRIX CORE STATUS: [" + engineStatus + "]", 20, 30);
+                
+                ctx.fillStyle = '#00E5FF';
+                ctx.fillText("📦 HARVEST DATA PIPELINE CAPTURED: " + totalScraped + " PROFILES", 20, 50);
+                ctx.fillText("⚡ DISCOVERY BUFFER SIZE: " + bufferSize + " TARGETS IN QUEUE", 20, 70);
+
+                // Simulated telemetry code streaming decoration on canvas footer
+                ctx.fillStyle = 'rgba(0, 255, 102, 0.3)';
+                ctx.font = "9px 'Courier New'";
+                ctx.fillText("SWARM_ENGINE_ACTIVE // PROXY_PIPELINE_OK // SYNCING_SQLITE_CACHING_SYS...", 20, canvas.height - 15);
+
+                requestAnimationFrame(loop);
+            }}
+            loop();
+        </script>
+    </body>
+    </html>
+    """
+    st.components.v1.html(canvas_html, height=415, scrolling=False)
+
+
+# --- INTERACTIVE TOPOLOGICAL GRAPH CANVAS (TAB 1) ---
 
 def render_interactive_topological_graph(enriched_nodes):
     nodes_js = []
@@ -632,14 +793,6 @@ async def master_pipeline_engine(s_id, t_id, pool_manager):
             log("[SYSTEM] Swarm complete. No path uncovered.")
         st.session_state.running = False
 
-if start_btn and s_input.isdigit() and t_input.isdigit():
-    pool_mgr = ProxyPool(proxy_input)
-    if pool_mgr.proxies:
-        st.session_state.running = True
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(master_pipeline_engine(int(s_input), int(t_input), pool_mgr))
-
 
 # ==========================================
 # TAB 2: REAL ROBLOX CRAWLER HARVESTER
@@ -660,6 +813,12 @@ with tab2:
         st.session_state.harvester_running = False
         st.rerun()
         
+    # Render static baseline canvas container when idle
+    canvas_placeholder = st.empty()
+    if not st.session_state.harvester_running:
+        with canvas_placeholder:
+            render_live_crawler_spider_canvas([], 0, 0, active_status="OFFLINE")
+
     harvest_console = st.empty()
     harvest_status = st.empty()
 
@@ -700,6 +859,11 @@ async def harvester_spider_worker(worker_id, pool_manager, harvest_queue, shared
                     shared_stats["scraped_count"] += 1
                     shared_stats["uncommitted_records"] += 1
                     
+                    # Track a rolling window of recent profile hits to stream directly into the live pixel canvas
+                    shared_stats["rolling_window"].append(user_id)
+                    if len(shared_stats["rolling_window"]) > 8:
+                        shared_stats["rolling_window"].pop(0)
+                    
                     if shared_stats["uncommitted_records"] >= 50:
                         shared_stats["uncommitted_records"] = 0
                         asyncio.create_task(upload_cache_to_cloud_async())
@@ -716,7 +880,13 @@ async def harvester_spider_worker(worker_id, pool_manager, harvest_queue, shared
 async def master_harvester_coordinator(seed_uid, max_profiles, pool_manager):
     harvest_queue = asyncio.Queue()
     harvest_queue.put_nowait(seed_uid)
-    shared_stats = {"scraped_count": 0, "limit": max_profiles, "total_api_calls": 0, "uncommitted_records": 0}
+    shared_stats = {
+        "scraped_count": 0, 
+        "limit": max_profiles, 
+        "total_api_calls": 0, 
+        "uncommitted_records": 0,
+        "rolling_window": []
+    }
     
     async with aiohttp.ClientSession() as session:
         workers = []
@@ -725,12 +895,23 @@ async def master_harvester_coordinator(seed_uid, max_profiles, pool_manager):
             
         while st.session_state.harvester_running and shared_stats["scraped_count"] < max_profiles:
             h, c, d = pool_manager.get_pool_diagnostics()
+            q_size = harvest_queue.qsize()
+            
             with tab2:
+                # Dynamically update the high-performance pixel-art radar dashboard canvas every loop iteration
+                with canvas_placeholder:
+                    render_live_crawler_spider_canvas(
+                        shared_stats["rolling_window"], 
+                        q_size, 
+                        shared_stats["scraped_count"], 
+                        active_status="RUNNING"
+                    )
+                
                 harvest_status.success(
                     f"🚀 Crawl Active | Live Channels: H:{h} C:{c} D:{d} | "
                     f"📂 Profiles Scraped: {shared_stats['scraped_count']} / {max_profiles}"
                 )
-                harvest_console.code(f"Queue Discovery Buffer Size: {harvest_queue.qsize()} targets waiting.", language="bash")
+                harvest_console.code(f"Queue Discovery Buffer Size: {q_size} targets waiting.", language="bash")
             await asyncio.sleep(1.0)
             
         st.session_state.harvester_running = False
@@ -752,7 +933,7 @@ if start_harvest_btn and seed_id_input.isdigit():
 # TAB 3: ROBLOX BACKBONE SEEDER
 # ==========================================
 with tab3:
-    st.subheader("📥 Live Advanced 2-Layer Backbone Hub Cultivator")
+    st.subheader("¼ Live Advanced 2-Layer Backbone Hub Cultivator")
     
     famous_hubs = {
         "Builderman (UID: 1)": 1,
