@@ -15,6 +15,7 @@ DB_FILE = "roblox_graph_map.db"
 HF_TOKEN = st.secrets.get("HF_TOKEN")
 HF_REPO_ID = st.secrets.get("HF_REPO_ID")
 
+# Combined Proxy Array: Merging both authentication pools seamlessly
 DEFAULT_PROXIES = """38.154.203.95:5863:zwgfezql:u1o2humd1hr8
 198.105.121.200:6462:zwgfezql:u1o2humd1hr8
 64.137.96.74:6641:zwgfezql:u1o2humd1hr8
@@ -24,7 +25,17 @@ DEFAULT_PROXIES = """38.154.203.95:5863:zwgfezql:u1o2humd1hr8
 142.111.67.146:5611:zwgfezql:u1o2humd1hr8
 191.96.254.138:6185:zwgfezql:u1o2humd1hr8
 23.229.19.94:8689:zwgfezql:u1o2humd1hr8
-2.57.20.2:6983:zwgfezql:u1o2humd1hr8"""
+2.57.20.2:6983:zwgfezql:u1o2humd1hr8
+31.59.20.176:6754:qquvrrms:c36jtmb5ca0w
+31.56.127.193:7684:qquvrrms:c36jtmb5ca0w
+45.38.107.97:6014:qquvrrms:c36jtmb5ca0w
+38.154.203.95:5863:qquvrrms:c36jtmb5ca0w
+198.105.121.200:6462:qquvrrms:c36jtmb5ca0w
+64.137.96.74:6641:qquvrrms:c36jtmb5ca0w
+198.23.243.226:6361:qquvrrms:c36jtmb5ca0w
+38.154.185.97:6370:qquvrrms:c36jtmb5ca0w
+142.111.67.146:5611:qquvrrms:c36jtmb5ca0w
+191.96.254.138:6185:qquvrrms:c36jtmb5ca0w"""
 
 
 # --- ADVANCED PROXY POOL HEALTH MANAGER ---
@@ -32,7 +43,6 @@ DEFAULT_PROXIES = """38.154.203.95:5863:zwgfezql:u1o2humd1hr8
 class ProxyPool:
     def __init__(self, raw_proxy_strings):
         self.proxies = self._parse_proxies(raw_proxy_strings)
-        # Structure: { proxy_url: {"status": "HEALTHY", "cool_down_until": 0, "failures": 0} }
         self.registry = {p: {"status": "HEALTHY", "cool_down_until": 0, "failures": 0} for p in self.proxies}
         
     def _parse_proxies(self, text):
@@ -76,11 +86,9 @@ class ProxyPool:
             self.registry[proxy]["status"] = "HEALTHY"
             self.registry[proxy]["failures"] = 0
         elif status_code == 429:
-            # 60 Second Penalty Box for Throttling
             self.registry[proxy]["status"] = "COOL_DOWN"
             self.registry[proxy]["cool_down_until"] = now + 60.0
         else:
-            # Drop connection errors or alternative failures
             self.registry[proxy]["failures"] += 1
             if self.registry[proxy]["failures"] >= 4:
                 self.registry[proxy]["status"] = "DEAD"
@@ -102,16 +110,13 @@ def calculate_node_priority(node_id, g_cache):
     if str_node in g_cache:
         friend_count = len(g_cache[str_node])
         return max(10, 200 - friend_count)
-    if node_id < 200000000:
-        return 300
-    if node_id < 1000000000:
-        return 500
-    if node_id > 4000000000:
-        return 1500
+    if node_id < 200000000: return 300
+    if node_id < 1000000000: return 500
+    if node_id > 4000000000: return 1500
     return 1000
 
 
-# --- SQLITE TARGET DATABASE INFRASTRUCTURE ---
+# --- SQLITE DATABASE INTEGRITY INFRASTRUCTURE ---
 
 def init_db():
     conn = sqlite3.connect(DB_FILE)
@@ -157,7 +162,8 @@ def load_persistent_cache():
 
 def save_single_profile_to_db(user_id, friends_list):
     try:
-        conn = sqlite3.connect(DB_FILE, timeout=20)
+        # High timeout value prevents file-locking drops during background crawls
+        conn = sqlite3.connect(DB_FILE, timeout=60.0)
         cursor = conn.cursor()
         cursor.execute(
             "INSERT OR REPLACE INTO graph (user_id, friends_list) VALUES (?, ?)",
@@ -170,7 +176,7 @@ def save_single_profile_to_db(user_id, friends_list):
 
 def sync_entire_memory_to_sqlite():
     try:
-        conn = sqlite3.connect(DB_FILE, timeout=30)
+        conn = sqlite3.connect(DB_FILE, timeout=60.0)
         cursor = conn.cursor()
         cursor.execute("BEGIN TRANSACTION")
         for uid, friends in st.session_state.global_cache.items():
@@ -183,12 +189,14 @@ def sync_entire_memory_to_sqlite():
     except Exception:
         pass
 
-def upload_cache_to_cloud():
+# --- THREAD-ISOLATED CLOUD LOCK ENGINE ---
+
+def upload_cache_to_cloud_blocking():
     if not HF_TOKEN or not HF_REPO_ID:
-        return False, "Configuration Missing"
+        return False, "Configuration credentials missing or invalid."
     sync_entire_memory_to_sqlite()
     if not os.path.exists(DB_FILE):
-        return False, "Local DB missing"
+        return False, "Target database file absent."
     try:
         api = HfApi()
         api.upload_file(
@@ -197,11 +205,22 @@ def upload_cache_to_cloud():
             repo_id=HF_REPO_ID,
             repo_type="dataset",
             token=HF_TOKEN,
-            commit_message="Automated incremental SQLite database backup execution"
+            commit_message="Automated incremental asynchronous cloud database commit"
         )
         return True, "Success"
     except Exception as e:
         return False, str(e)
+
+async def upload_cache_to_cloud_async():
+    if "cloud_lock" not in st.session_state:
+        st.session_state.cloud_lock = asyncio.Lock()
+        
+    async with st.session_state.cloud_lock:
+        success, diagnostics = await asyncio.to_thread(upload_cache_to_cloud_blocking)
+        if not success:
+            # Safely logs to dashboard console output stream instead of breaking runtimes
+            st.session_state.logs.append(f"[CLOUD-WARN] Backup delayed: {diagnostics}")
+        return success, diagnostics
 
 
 if "global_cache" not in st.session_state:
@@ -252,7 +271,7 @@ def render_cyber_graph_ui(enriched_nodes):
 
 with st.sidebar:
     st.header("⚙️ Global Control Array")
-    proxy_input = st.text_area("🌐 Webshare Proxy Gateways:", value=DEFAULT_PROXIES, height=220)
+    proxy_input = st.text_area("🌐 Active Webshare Proxies:", value=DEFAULT_PROXIES, height=220)
     st.markdown("---")
     st.metric("Roblox Profiles In Sync DB", len(st.session_state.global_cache))
     
@@ -260,10 +279,12 @@ with st.sidebar:
     if HF_TOKEN and HF_REPO_ID:
         st.caption(f"Linked Repo: `{HF_REPO_ID}`")
         if st.button("🔄 Force Push DB to Cloud", use_container_width=True):
-            success, _ = upload_cache_to_cloud()
+            success, error_msg = upload_cache_to_cloud_blocking()
             if success:
                 st.toast("Database backed up successfully!", icon="🚀")
                 st.rerun()
+            else:
+                st.error(f"💥 Transfer Dropped: {error_msg}")
     else:
         st.warning("⚠️ Running in Local-Only Mode.")
 
@@ -276,16 +297,12 @@ with tab1:
     st.subheader("Dual-Queue Target Analysis Execution (Informed Best-First Engine)")
     
     c1, c2 = st.columns(2)
-    with c1:
-        s_input = st.text_input("Start Profile ID:", "1703896246")
-    with c2:
-        t_input = st.text_input("Target Profile ID:", "140671171")
+    with c1: s_input = st.text_input("Start Profile ID:", "1703896246")
+    with c2: t_input = st.text_input("Target Profile ID:", "140671171")
         
     btn_col1, btn_col2 = st.columns(2)
-    with btn_col1:
-        start_btn = st.button("🚀 Ignite Pipeline Swarm", use_container_width=True, type="primary")
-    with btn_col2:
-        stop_btn = st.button("🛑 Kill Pipeline Tasks", use_container_width=True)
+    with btn_col1: start_btn = st.button("🚀 Ignite Pipeline Swarm", use_container_width=True, type="primary")
+    with btn_col2: stop_btn = st.button("🛑 Kill Pipeline Tasks", use_container_width=True)
         
     if stop_btn:
         st.session_state.running = False
@@ -309,8 +326,7 @@ async def cache_processor_task(network_queue, cache_queue, start_visited, target
         results_container["cache_hits"] += 1
         
         current_path = start_visited.get(node) if direction == "FORWARD" else target_visited.get(node)
-        if not current_path or len(current_path) >= 5:
-            continue
+        if not current_path or len(current_path) >= 5: continue
             
         for friend in friends:
             friend_int = int(friend)
@@ -322,10 +338,8 @@ async def cache_processor_task(network_queue, cache_queue, start_visited, target
                 if friend_int not in start_visited:
                     start_visited[friend_int] = current_path + [friend_int]
                     f_score = calculate_node_priority(friend_int, g_cache)
-                    if str(friend_int) in g_cache:
-                        cache_queue.put_nowait((f_score, ("FORWARD", friend_int)))
-                    else:
-                        network_queue.put_nowait((f_score, ("FORWARD", friend_int)))
+                    if str(friend_int) in g_cache: cache_queue.put_nowait((f_score, ("FORWARD", friend_int)))
+                    else: network_queue.put_nowait((f_score, ("FORWARD", friend_int)))
             else:
                 if friend_int in start_visited:
                     results_container["final_chain"] = start_visited[friend_int] + current_path[::-1]
@@ -334,10 +348,8 @@ async def cache_processor_task(network_queue, cache_queue, start_visited, target
                 if friend_int not in target_visited:
                     target_visited[friend_int] = current_path + [friend_int]
                     f_score = calculate_node_priority(friend_int, g_cache)
-                    if str(friend_int) in g_cache:
-                        cache_queue.put_nowait((f_score, ("REVERSE", friend_int)))
-                    else:
-                        network_queue.put_nowait((f_score, ("REVERSE", friend_int)))
+                    if str(friend_int) in g_cache: cache_queue.put_nowait((f_score, ("REVERSE", friend_int)))
+                    else: network_queue.put_nowait((f_score, ("REVERSE", friend_int)))
 
 async def proxy_worker_task(worker_id, pool_manager, network_queue, cache_queue, start_visited, target_visited, session, path_found_event, results_container, log_func):
     g_cache = st.session_state.global_cache
@@ -362,8 +374,7 @@ async def proxy_worker_task(worker_id, pool_manager, network_queue, cache_queue,
             continue
             
         current_path = start_visited.get(node) if direction == "FORWARD" else target_visited.get(node)
-        if not current_path or len(current_path) >= 5:
-            continue
+        if not current_path or len(current_path) >= 5: continue
             
         url = f"https://friends.roblox.com/v1/users/{node}/friends"
         try:
@@ -388,10 +399,8 @@ async def proxy_worker_task(worker_id, pool_manager, network_queue, cache_queue,
                                 break
                             if friend not in start_visited:
                                 start_visited[friend] = current_path + [friend]
-                                if str(friend) in g_cache:
-                                    cache_queue.put_nowait((f_score, ("FORWARD", friend)))
-                                else:
-                                    network_queue.put_nowait((f_score, ("FORWARD", friend)))
+                                if str(friend) in g_cache: cache_queue.put_nowait((f_score, ("FORWARD", friend)))
+                                else: network_queue.put_nowait((f_score, ("FORWARD", friend)))
                         else:
                             if friend in start_visited:
                                 results_container["final_chain"] = start_visited[friend] + current_path[::-1]
@@ -399,10 +408,8 @@ async def proxy_worker_task(worker_id, pool_manager, network_queue, cache_queue,
                                 break
                             if friend not in target_visited:
                                 target_visited[friend] = current_path + [friend]
-                                if str(friend) in g_cache:
-                                    cache_queue.put_nowait((f_score, ("REVERSE", friend)))
-                                else:
-                                    network_queue.put_nowait((f_score, ("REVERSE", friend)))
+                                if str(friend) in g_cache: cache_queue.put_nowait((f_score, ("REVERSE", friend)))
+                                else: network_queue.put_nowait((f_score, ("REVERSE", friend)))
                     await asyncio.sleep(0.1)
                 else:
                     network_queue.put_nowait((score, (direction, node)))
@@ -418,8 +425,7 @@ async def fetch_user_groups_async(session, user_id, pool_manager):
             if response.status == 200:
                 data = await response.json()
                 return {g["group"]["id"]: g["group"]["name"] for g in data.get("data", [])}
-    except Exception:
-        pass
+    except Exception: pass
     return {}
 
 async def execute_group_intersection_scan(session, s_id, t_id, pool_manager, placeholder):
@@ -446,8 +452,7 @@ async def fetch_profile_intel_async(session, user_id, pool_manager):
             if resp.status == 200:
                 data = await resp.json()
                 return {"id": user_id, "name": data.get("name", f"UID:{user_id}"), "created": data.get("created", "Unknown")[:10], "isBanned": data.get("isBanned", False)}
-    except Exception:
-        pass
+    except Exception: pass
     return {"id": user_id, "name": f"UID:{user_id}", "created": "Unknown", "isBanned": False}
 
 async def master_pipeline_engine(s_id, t_id, pool_manager):
@@ -480,7 +485,6 @@ async def master_pipeline_engine(s_id, t_id, pool_manager):
         asyncio.create_task(execute_group_intersection_scan(session, s_id, t_id, pool_manager, group_placeholder))
         
         workers = [asyncio.create_task(cache_processor_task(network_queue, cache_queue, start_visited, target_visited, path_found_event, results_container))]
-        # Launch 8 concurrent parallel pipeline channels reading from the pool manager
         for idx in range(8):
             workers.append(asyncio.create_task(proxy_worker_task(idx + 1, pool_manager, network_queue, cache_queue, start_visited, target_visited, session, path_found_event, results_container, log)))
 
@@ -497,7 +501,7 @@ async def master_pipeline_engine(s_id, t_id, pool_manager):
         await asyncio.gather(*workers, return_exceptions=True)
 
         if results_container["new_discoveries"]:
-            upload_cache_to_cloud()
+            await upload_cache_to_cloud_async()
 
         if results_container["final_chain"]:
             clean_chain = []
@@ -531,16 +535,12 @@ with tab2:
     st.write("Drives automated background harvesting across healthy proxy pipelines.")
     
     hc1, hc2 = st.columns(2)
-    with hc1:
-        seed_id_input = st.text_input("Harvester Seed User ID (Start Node):", "1703896246")
-    with hc2:
-        max_harvest = st.number_input("Max Users to Scrape Before Auto-Stop:", min_value=100, max_value=100000, value=2000, step=500)
+    with hc1: seed_id_input = st.text_input("Harvester Seed User ID (Start Node):", "1703896246")
+    with hc2: max_harvest = st.number_input("Max Users to Scrape Before Auto-Stop:", min_value=100, max_value=100000, value=2000, step=500)
         
     hbtn1, hbtn2 = st.columns(2)
-    with hbtn1:
-        start_harvest_btn = st.button("⚡ Ignite High-Speed Crawler", use_container_width=True, type="primary")
-    with hbtn2:
-        stop_harvest_btn = st.button("🛑 Force Stop Harvester", use_container_width=True)
+    with hbtn1: start_harvest_btn = st.button("⚡ Ignite High-Speed Crawler", use_container_width=True, type="primary")
+    with hbtn2: stop_harvest_btn = st.button("🛑 Force Stop Harvester", use_container_width=True)
         
     if stop_harvest_btn:
         st.session_state.harvester_running = False
@@ -588,7 +588,7 @@ async def harvester_spider_worker(worker_id, pool_manager, harvest_queue, shared
                     
                     if shared_stats["uncommitted_records"] >= 50:
                         shared_stats["uncommitted_records"] = 0
-                        upload_cache_to_cloud()
+                        asyncio.create_task(upload_cache_to_cloud_async())
                         
                     for friend in friends:
                         if str(friend) not in g_cache: harvest_queue.put_nowait(friend)
@@ -621,7 +621,7 @@ async def master_harvester_coordinator(seed_uid, max_profiles, pool_manager):
             
         st.session_state.harvester_running = False
         await asyncio.gather(*workers, return_exceptions=True)
-        upload_cache_to_cloud()
+        await upload_cache_to_cloud_async()
 
 if start_harvest_btn and seed_id_input.isdigit():
     pool_mgr = ProxyPool(proxy_input)
@@ -654,10 +654,8 @@ with tab3:
     max_layer2_nodes = st.number_input("Max Layer-2 Profiles to Swarm:", min_value=10, max_value=2000, value=250, step=50)
         
     s_col1, s_col2 = st.columns(2)
-    with s_col1:
-        ignite_seed = st.button("🔥 Ignite 2-Layer Backbone Swarm", use_container_width=True, type="primary")
-    with s_col2:
-        kill_seed = st.button("🛑 Force Stop Seeder Swarm", use_container_width=True)
+    with s_col1: ignite_seed = st.button("🔥 Ignite 2-Layer Backbone Swarm", use_container_width=True, type="primary")
+    with s_col2: kill_seed = st.button("🛑 Force Stop Seeder Swarm", use_container_width=True)
         
     if kill_seed:
         st.session_state.seeder_running = False
@@ -720,9 +718,10 @@ with tab3:
                 await seed_worker_pipeline(l2_uid, pool_manager, session, shared_metrics)
                 await asyncio.sleep(0.1)
                 
-                if shared_metrics["saved_nodes"] % 25 == 0: upload_cache_to_cloud()
+                if shared_metrics["saved_nodes"] % 25 == 0:
+                    await upload_cache_to_cloud_async()
                     
-            upload_cache_to_cloud()
+            await upload_cache_to_cloud_async()
             st.session_state.seeder_running = False
             st.success("🎉 Deep Social Highway established completely!")
 
@@ -769,7 +768,7 @@ with tab3:
         database[str(t_id_int)].extend(random.sample(filler_ids, k=20))
         for key in database: database[key] = list(set([int(x) for x in database[key] if int(x) != int(key)]))
         st.session_state.global_cache = database
-        upload_cache_to_cloud()
+        upload_cache_to_cloud_blocking()
         st.success("✅ Mock Database Seeded!")
         st.rerun()
 
@@ -785,7 +784,7 @@ with tab3:
                 try: os.remove(DB_FILE)
                 except Exception: pass
             init_db()
-            upload_cache_to_cloud()
+            upload_cache_to_cloud_blocking()
             st.success("💥 Database dropped!")
             st.rerun()
             
@@ -801,6 +800,6 @@ with tab3:
                 orig_list = g_cache[key]
                 cleaned_list = [x for x in orig_list if str(x) not in mock_hubs]
                 if len(cleaned_list) != len(orig_list): g_cache[key] = cleaned_list; nodes_altered += 1
-            upload_cache_to_cloud()
+            upload_cache_to_cloud_blocking()
             st.success(f"✅ Scrubbed reference matrices! Removed {nodes_altered} links.")
             st.rerun()
