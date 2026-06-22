@@ -3,14 +3,15 @@ import asyncio
 import aiohttp
 import json
 import os
-import time
+import sqlite3
 import random
 import pandas as pd
 from huggingface_hub import HfApi, hf_hub_download
 
 st.set_page_config(page_title="Recon Engine: Ultra Core", layout="wide")
 
-CACHE_FILE = "roblox_graph_map.json"
+# Database Configuration (Swapped from JSON to SQLite binary format)
+DB_FILE = "roblox_graph_map.db"
 HF_TOKEN = st.secrets.get("HF_TOKEN")
 HF_REPO_ID = st.secrets.get("HF_REPO_ID")
 
@@ -27,65 +28,107 @@ DEFAULT_PROXIES = """38.154.203.95:5863:zwgfezql:u1o2humd1hr8
 2.57.20.2:6983:zwgfezql:u1o2humd1hr8"""
 
 
-# --- DIAGNOSTIC CLOUD DATABASE ENGINE ---
+# --- SQLITE TARGET DATABASE INFRASTRUCTURE ---
+
+def init_db():
+    """Initializes the SQLite schema locally."""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS graph (
+            user_id TEXT PRIMARY KEY,
+            friends_list TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
 
 def load_persistent_cache():
-    """Downloads the graph from Hugging Face on startup."""
+    """Downloads DB from HF on startup and populates the localized memory array."""
+    init_db()
     if HF_TOKEN and HF_REPO_ID:
         try:
             resolved_path = hf_hub_download(
                 repo_id=HF_REPO_ID,
-                filename=CACHE_FILE,
+                filename=DB_FILE,
                 repo_type="dataset",
                 token=HF_TOKEN
             )
-            with open(resolved_path, "r", encoding="utf-8") as f:
-                return json.load(f)
+            # Safe overwrite local DB workspace with cloud asset binary copy
+            if os.path.exists(resolved_path):
+                with open(resolved_path, "rb") as f_src:
+                    with open(DB_FILE, "wb") as f_dst:
+                        f_dst.write(f_src.read())
         except Exception as e:
             st.sidebar.error(f"⚠️ Initial Cloud Load Skipped: {str(e)}")
 
-    if os.path.exists(CACHE_FILE):
-        try:
-            with open(CACHE_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {}
-    return {}
-
-def save_persistent_cache(cache_data):
-    """Writes data immediately to local disk."""
+    # Load records out of SQLite space straight into high-speed session dictionary
+    memory_cache = {}
     try:
-        with open(CACHE_FILE, "w", encoding="utf-8") as f:
-            json.dump(cache_data, f)
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute("SELECT user_id, friends_list FROM graph")
+        rows = cursor.fetchall()
+        for row in rows:
+            memory_cache[str(row[0])] = json.loads(row[1])
+        conn.close()
+    except Exception:
+        pass
+    return memory_cache
+
+def save_single_profile_to_db(user_id, friends_list):
+    """Saves a single scraped record incrementally straight to SQLite disk layer."""
+    try:
+        conn = sqlite3.connect(DB_FILE, timeout=20)
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT OR REPLACE INTO graph (user_id, friends_list) VALUES (?, ?)",
+            (str(user_id), json.dumps(friends_list))
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+def sync_entire_memory_to_sqlite():
+    """Mass dumps active RAM matrix layout into local SQLite system blocks."""
+    try:
+        conn = sqlite3.connect(DB_FILE, timeout=30)
+        cursor = conn.cursor()
+        # Batch execute parameters via optimized database transactions
+        cursor.execute("BEGIN TRANSACTION")
+        for uid, friends in st.session_state.global_cache.items():
+            cursor.execute(
+                "INSERT OR REPLACE INTO graph (user_id, friends_list) VALUES (?, ?)",
+                (str(uid), json.dumps(friends))
+            )
+        conn.commit()
+        conn.close()
     except Exception:
         pass
 
 def upload_cache_to_cloud():
-    """Pushes local file to HF and returns a status tuple (Success: bool, Details: str)"""
+    """Pushes optimized SQLite binary package directly over HF Hub pipelines."""
     if not HF_TOKEN:
         return False, "Secrets Error: 'HF_TOKEN' is missing or blank in Streamlit."
     if not HF_REPO_ID:
         return False, "Secrets Error: 'HF_REPO_ID' is missing or blank in Streamlit."
         
-    # FORCE SYNC: Dump active memory straight to disk right before pushing
-    try:
-        with open(CACHE_FILE, "w", encoding="utf-8") as f:
-            json.dump(st.session_state.global_cache, f)
-    except Exception as e:
-        return False, f"Local Disk Write Failure: {str(e)}"
+    # Flush current RAM values into database cells prior to sync push
+    sync_entire_memory_to_sqlite()
         
-    if not os.path.exists(CACHE_FILE):
-        return False, f"Local File Error: '{CACHE_FILE}' failed to generate on server workspace."
+    if not os.path.exists(DB_FILE):
+        return False, f"Local File Error: '{DB_FILE}' failed to generate on server workspace."
         
     try:
         api = HfApi()
         api.upload_file(
-            path_or_fileobj=CACHE_FILE,
-            path_in_repo=CACHE_FILE,
+            path_or_fileobj=DB_FILE,
+            path_in_repo=DB_FILE,
             repo_id=HF_REPO_ID,
             repo_type="dataset",
             token=HF_TOKEN,
-            commit_message="Automated execution social graph backup"
+            commit_message="Automated incremental SQLite database backup execution"
         )
         return True, "Success"
     except Exception as e:
@@ -116,7 +159,7 @@ def parse_proxy_input(raw_text):
             cleaned.append(f"http://{parts[2]}:{parts[3]}@{parts[0]}:{parts[1]}")
     return cleaned
 
-# --- FEATURE 3: TACTICAL HTML NODE CHAIN UI VISUALIZER ---
+# --- TACTICAL HTML NODE CHAIN UI VISUALIZER ---
 def render_cyber_graph_ui(enriched_nodes):
     html_elements = ""
     for idx, node in enumerate(enriched_nodes):
@@ -174,7 +217,7 @@ with st.sidebar:
         if st.button("🔄 Force Push DB to Cloud", use_container_width=True):
             success, diagnostic_msg = upload_cache_to_cloud()
             if success:
-                st.toast("Database backed up successfully!", icon="🚀")
+                st.toast("Database backed up successfully to SQLite cloud dataset!", icon="🚀")
                 st.rerun()
             else:
                 st.error(f"💥 Transfer Dropped:\n\n`{diagnostic_msg}`")
@@ -283,6 +326,7 @@ async def proxy_worker_task(worker_id, proxy, network_queue, cache_queue, start_
                     friends = [int(f["id"]) for f in data.get("data", []) if not f.get("isDeleted", False)]
                     
                     g_cache[str_node] = friends
+                    save_single_profile_to_db(str_node, friends)
                     results_container["new_discoveries"][str_node] = friends
                     
                     for friend in friends:
@@ -409,7 +453,6 @@ async def master_pipeline_engine(s_id, t_id, proxies):
         await asyncio.gather(*workers, return_exceptions=True)
 
         if results_container["new_discoveries"]:
-            save_persistent_cache(g_cache)
             upload_cache_to_cloud()
 
         if results_container["final_chain"]:
@@ -492,12 +535,15 @@ async def harvester_spider_worker(worker_id, proxy, harvest_queue, shared_stats,
                     friends = [int(f["id"]) for f in data.get("data", []) if not f.get("isDeleted", False)]
                     
                     g_cache[str_user] = friends
+                    save_single_profile_to_db(str_user, friends)
+                    
                     shared_stats["scraped_count"] += 1
                     shared_stats["uncommitted_records"] += 1
                     
-                    if shared_stats["uncommitted_records"] >= 100:
-                        save_persistent_cache(g_cache)
+                    if shared_stats["uncommitted_records"] >= 50:
                         shared_stats["uncommitted_records"] = 0
+                        # Trigger an asynchronous upload call out to Hugging Face backup pools
+                        upload_cache_to_cloud()
                         
                     for friend in friends:
                         if str(friend) not in g_cache:
@@ -534,15 +580,13 @@ async def master_harvester_coordinator(seed_uid, max_profiles, proxies):
                 )
                 harvest_console.code(
                     f"Queue Discovery Buffer Size: {harvest_queue.qsize()} profiles pending tracking.\n"
-                    f"RAM Cache buffer uncommitted rows: {shared_stats['uncommitted_records']}/100\n"
+                    f"Incremental Saves written straight to DB execution blocks.\n"
                     f"Status: Ingesting verified friend network sequences...", language="bash"
                 )
             await asyncio.sleep(1.0)
             
         st.session_state.harvester_running = False
         await asyncio.gather(*workers, return_exceptions=True)
-        
-        save_persistent_cache(st.session_state.global_cache)
         upload_cache_to_cloud()
 
 if start_harvest_btn and seed_id_input.isdigit():
@@ -587,6 +631,7 @@ with tab3:
                     data = await resp.json()
                     friends = [int(f["id"]) for f in data.get("data", []) if not f.get("isDeleted", False)]
                     g_cache[str(uid)] = friends
+                    save_single_profile_to_db(str(uid), friends)
                     return len(friends)
         except Exception:
             pass
@@ -599,7 +644,6 @@ with tab3:
                 p = proxies[i % len(proxies)] if proxies else None
                 tasks.append(seed_worker(uid, p, session))
             await asyncio.gather(*tasks)
-            save_persistent_cache(st.session_state.global_cache)
             upload_cache_to_cloud()
             st.success(f"🎉 Backbone construction completed! Populated real connection matrices for selected Roblox hubs.")
 
@@ -647,9 +691,8 @@ with tab3:
         for key in database:
             database[key] = list(set([int(x) for x in database[key] if int(x) != int(key)]))
         st.session_state.global_cache = database
-        save_persistent_cache(database)
         upload_cache_to_cloud()
-        st.success("✅ Mock Database Seeded!")
+        st.success("✅ Mock Database Seeded into SQLite structural format!")
         st.rerun()
 
     # --- DATABASE MAINTENANCE PANELS ---
@@ -664,10 +707,10 @@ with tab3:
         wipe_all_btn = st.button("💥 Wipe Entire Cache File & Memory", use_container_width=True, type="secondary")
         if wipe_all_btn:
             st.session_state.global_cache = {}
-            if os.path.exists(CACHE_FILE):
-                try: os.remove(CACHE_FILE)
+            if os.path.exists(DB_FILE):
+                try: os.remove(DB_FILE)
                 except Exception: pass
-            save_persistent_cache({})
+            init_db()
             upload_cache_to_cloud()
             st.success("💥 Database dropped! Reset to 0 records.")
             st.rerun()
@@ -689,7 +732,6 @@ with tab3:
                 if len(cleaned_list) != len(orig_list):
                     g_cache[key] = cleaned_list
                     nodes_altered += 1
-            save_persistent_cache(g_cache)
             upload_cache_to_cloud()
             st.success(f"✅ Scrubbed reference matrices! Removed {nodes_altered} link dependencies.")
             st.rerun()
