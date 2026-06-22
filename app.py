@@ -9,31 +9,131 @@ import time
 import pandas as pd
 from huggingface_hub import HfApi, hf_hub_download
 
-# [KEEP ALL YOUR EXISTING IMPORT/CLASS/DB FUNCTIONS HERE - THE REST IS THE UPDATED UI]
+st.set_page_config(page_title="Recon Engine: Ultra Core", layout="wide")
 
-# --- RE-ENGINEERED: SPIDER WEB VISUALIZER ---
+DB_FILE = "roblox_graph_map.db"
+HF_TOKEN = st.secrets.get("HF_TOKEN")
+HF_REPO_ID = st.secrets.get("HF_REPO_ID")
+
+# Merged proxy list from user uploads
+DEFAULT_PROXIES = """31.59.20.176:6754:qquvrrms:c36jtmb5ca0w
+31.56.127.193:7684:qquvrrms:c36jtmb5ca0w
+45.38.107.97:6014:qquvrrms:c36jtmb5ca0w
+38.154.203.95:5863:qquvrrms:c36jtmb5ca0w
+198.105.121.200:6462:qquvrrms:c36jtmb5ca0w
+64.137.96.74:6641:qquvrrms:c36jtmb5ca0w
+198.23.243.226:6361:qquvrrms:c36jtmb5ca0w
+38.154.185.97:6370:qquvrrms:c36jtmb5ca0w
+142.111.67.146:5611:qquvrrms:c36jtmb5ca0w
+191.96.254.138:6185:qquvrrms:c36jtmb5ca0w
+38.154.203.95:5863:zwgfezql:u1o2humd1hr8
+198.105.121.200:6462:zwgfezql:u1o2humd1hr8
+64.137.96.74:6641:zwgfezql:u1o2humd1hr8
+209.127.138.10:5784:zwgfezql:u1o2humd1hr8
+38.154.185.97:6370:zwgfezql:u1o2humd1hr8
+84.247.60.125:6095:zwgfezql:u1o2humd1hr8
+142.111.67.146:5611:zwgfezql:u1o2humd1hr8
+191.96.254.138:6185:zwgfezql:u1o2humd1hr8
+23.229.19.94:8689:zwgfezql:u1o2humd1hr8
+2.57.20.2:6983:zwgfezql:u1o2humd1hr8"""
+
+class ProxyPool:
+    def __init__(self, raw_proxy_strings):
+        self.proxies = self._parse_proxies(raw_proxy_strings)
+        self.registry = {p: {"status": "HEALTHY", "cool_down_until": 0, "failures": 0} for p in self.proxies}
+        
+    def _parse_proxies(self, text):
+        lines = text.split("\n")
+        cleaned = []
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith("#"): continue
+            if line.count(":") == 3:
+                parts = line.split(":")
+                cleaned.append(f"http://{parts[2]}:{parts[3]}@{parts[0]}:{parts[1]}")
+        return cleaned
+
+    def get_healthy_proxy(self):
+        now = time.time()
+        available = [p for p, meta in self.registry.items() 
+                     if meta["status"] == "HEALTHY" or (meta["status"] == "COOL_DOWN" and now >= meta["cool_down_until"])]
+        if not available: return None
+        return random.choice(available)
+
+    def report_status(self, proxy, status_code):
+        if proxy not in self.registry: return
+        now = time.time()
+        if status_code == 200:
+            self.registry[proxy]["status"] = "HEALTHY"
+            self.registry[proxy]["failures"] = 0
+        elif status_code == 429:
+            self.registry[proxy]["status"] = "COOL_DOWN"
+            self.registry[proxy]["cool_down_until"] = now + 60.0
+        else:
+            self.registry[proxy]["failures"] += 1
+            if self.registry[proxy]["failures"] >= 4: self.registry[proxy]["status"] = "DEAD"
+            else:
+                self.registry[proxy]["status"] = "COOL_DOWN"
+                self.registry[proxy]["cool_down_until"] = now + 15.0
+
+    def get_pool_diagnostics(self):
+        healthy = sum(1 for p in self.registry.values() if p["status"] == "HEALTHY")
+        cooling = sum(1 for p in self.registry.values() if p["status"] == "COOL_DOWN")
+        dead = sum(1 for p in self.registry.values() if p["status"] == "DEAD")
+        return healthy, cooling, dead
+
+def init_db():
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("CREATE TABLE IF NOT EXISTS graph (user_id TEXT PRIMARY KEY, friends_list TEXT)")
+    conn.commit()
+    conn.close()
+
+def load_persistent_cache():
+    init_db()
+    memory_cache = {}
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute("SELECT user_id, friends_list FROM graph")
+        for row in cursor.fetchall(): memory_cache[str(row[0])] = json.loads(row[1])
+        conn.close()
+    except: pass
+    return memory_cache
+
+def save_single_profile_to_db(user_id, friends_list):
+    try:
+        conn = sqlite3.connect(DB_FILE, timeout=60.0)
+        cursor = conn.cursor()
+        cursor.execute("INSERT OR REPLACE INTO graph (user_id, friends_list) VALUES (?, ?)", (str(user_id), json.dumps(friends_list)))
+        conn.commit()
+        conn.close()
+    except: pass
+
+if "global_cache" not in st.session_state: st.session_state.global_cache = load_persistent_cache()
+if "logs" not in st.session_state: st.session_state.logs = []
+if "running" not in st.session_state: st.session_state.running = False
+if "final_enriched_path" not in st.session_state: st.session_state.final_enriched_path = None
+
+# --- VISUALIZERS ---
 def render_spider_web_path_canvas(enriched_profiles):
-    nodes_payload = [
+    nodes_json = json.dumps([
         {"id": str(n["id"]), "name": str(n["name"]), "isBanned": bool(n["isBanned"])} 
         for n in enriched_profiles
-    ]
-
-    # This HTML contains the JS logic for the "Walking Spider"
+    ])
+    
     web_html = f"""
     <!DOCTYPE html>
     <html>
-    <body style="margin:0; background:#04060a;">
+    <body style="margin:0; background:#04060a; overflow:hidden;">
         <canvas id="web-canvas" width="800" height="400"></canvas>
         <script>
             const canvas = document.getElementById('web-canvas');
             const ctx = canvas.getContext('2d');
-            const nodes = {json.dumps(nodes_payload)};
-            
-            // Generate web positions
-            const centerX = 400;
-            const centerY = 200;
+            const nodes = {nodes_json};
+            const centerX = 400, centerY = 200;
             const mappedNodes = nodes.map((n, i) => {{
-                const angle = (i / nodes.length) * Math.PI * 2;
+                const angle = (i / Math.max(1, nodes.length - 1)) * Math.PI * 2;
                 const dist = 50 + (i * 30);
                 return {{ ...n, x: centerX + Math.cos(angle)*dist, y: centerY + Math.sin(angle)*dist }};
             }});
@@ -41,55 +141,32 @@ def render_spider_web_path_canvas(enriched_profiles):
             let progress = 0;
             let currentNode = 0;
 
-            function drawWeb() {{
+            function animate() {{
+                ctx.clearRect(0,0,800,400);
                 ctx.strokeStyle = '#1a2b3c';
-                // Draw Spoke
                 ctx.beginPath();
-                for(let n of mappedNodes) {{ ctx.moveTo(centerX, centerY); ctx.lineTo(n.x, n.y); }}
+                mappedNodes.forEach(n => {{ ctx.moveTo(centerX, centerY); ctx.lineTo(n.x, n.y); }});
                 ctx.stroke();
-                // Draw Nodes
+
                 mappedNodes.forEach((n, i) => {{
                     ctx.fillStyle = i === 0 ? '#00FF66' : (i === nodes.length-1 ? '#FF0055' : '#00E5FF');
                     ctx.beginPath(); ctx.arc(n.x, n.y, 8, 0, Math.PI*2); ctx.fill();
-                    ctx.fillStyle = 'white'; ctx.fillText(n.name, n.x+10, n.y);
                 }});
-            }}
 
-            function drawSpider(x, y, angle) {{
-                ctx.save();
-                ctx.translate(x, y);
-                ctx.rotate(angle + Math.PI/2);
-                ctx.fillStyle = '#00FF66';
-                ctx.beginPath(); ctx.arc(0,0, 6, 0, Math.PI*2); // Body
-                ctx.arc(0, -5, 4, 0, Math.PI*2); // Head
-                ctx.fill();
-                // Legs
-                ctx.strokeStyle = '#00FF66';
-                for(let i=0; i<4; i++) {{
-                    ctx.beginPath();
-                    ctx.moveTo(2,0); ctx.lineTo(15 + (i*5), -10+(i*5));
-                    ctx.moveTo(-2,0); ctx.lineTo(-15 - (i*5), -10+(i*5));
-                    ctx.stroke();
-                }}
-                ctx.restore();
-            }}
-
-            function animate() {{
-                ctx.clearRect(0,0,800,400);
-                drawWeb();
-                
                 if (currentNode < mappedNodes.length - 1) {{
                     let p1 = mappedNodes[currentNode];
                     let p2 = mappedNodes[currentNode+1];
-                    let spiderX = p1.x + (p2.x - p1.x) * progress;
-                    let spiderY = p1.y + (p2.y - p1.y) * progress;
-                    let angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+                    let x = p1.x + (p2.x - p1.x) * progress;
+                    let y = p1.y + (p2.y - p1.y) * progress;
                     
-                    drawSpider(spiderX, spiderY, angle);
-                    progress += 0.01;
+                    ctx.fillStyle = '#00FF66';
+                    ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI*2); ctx.fill();
+                    
+                    progress += 0.02;
                     if (progress >= 1) {{ progress = 0; currentNode++; }}
-                }} else {{
-                    drawSpider(mappedNodes[currentNode].x, mappedNodes[currentNode].y, 0);
+                }} else if (mappedNodes.length > 0) {{
+                    ctx.fillStyle = '#FF0055';
+                    ctx.beginPath(); ctx.arc(mappedNodes[mappedNodes.length-1].x, mappedNodes[mappedNodes.length-1].y, 8, 0, Math.PI*2); ctx.fill();
                 }}
                 requestAnimationFrame(animate);
             }}
@@ -100,47 +177,22 @@ def render_spider_web_path_canvas(enriched_profiles):
     """
     st.components.v1.html(web_html, height=420)
 
-# --- RE-ENGINEERED: LIVE SWARM MONITOR ---
-def render_live_crawler_spider_canvas(recent_nodes, total_scraped):
-    # This creates a "Web" pulsing effect in the background
-    canvas_html = f"""
-    <canvas id="radar" width="800" height="200" style="background:#05070f; border-radius:10px;"></canvas>
-    <script>
-        const c = document.getElementById('radar');
-        const ctx = c.getContext('2d');
-        let t = 0;
-        function draw() {{
-            ctx.clearRect(0,0,800,200);
-            ctx.strokeStyle = '#00FF66';
-            // Pulsing Web
-            for(let i=0; i<5; i++) {{
-                ctx.beginPath();
-                ctx.arc(400, 100, 20 + i*20 + Math.sin(t)*5, 0, Math.PI*2);
-                ctx.stroke();
-            }}
-            ctx.fillStyle = '#00FF66';
-            ctx.fillText("🕸️ SWARM ACTIVE: {total_scraped} PROFILES HARVESTED", 10, 20);
-            t+=0.05;
-            requestAnimationFrame(draw);
-        }}
-        draw();
-    </script>
-    """
-    st.components.v1.html(canvas_html, height=210)
+# --- UI ---
+with st.sidebar:
+    st.header("⚙️ Global Control")
+    proxy_input = st.text_area("🌐 Proxies:", value=DEFAULT_PROXIES, height=200)
 
-# --- APP LOGIC SECTION (Keep your existing tab structure) ---
-# ... inside your tab1 implementation ...
+tab1, tab2, tab3 = st.tabs(["🚀 Engine", "🌍 Harvester", "📦 Seeder"])
+
+with tab1:
+    s_input = st.text_input("Start ID:", "1703896246")
+    t_input = st.text_input("Target ID:", "140671171")
+    if st.button("🚀 Ignite Pipeline"):
+        st.session_state.final_enriched_path = None
+        st.session_state.running = True
+        st.rerun()
 
     if st.session_state.final_enriched_path:
-        st.markdown("### 🕸️ Path Weaving Complete")
         render_spider_web_path_canvas(st.session_state.final_enriched_path)
-        
-        # Display the result list below the animation
-        df_path = pd.DataFrame(st.session_state.final_enriched_path)
-        st.table(df_path[["name", "id"]])
-    else:
-        st.info("Waiting for swarm...")
-
-# --- ENSURE NO AUTO-RESET ---
-# Make sure your `master_pipeline_engine` does NOT call st.rerun() 
-# inside the loops. Only call st.rerun() after the engine is fully finished.
+        df = pd.DataFrame(st.session_state.final_enriched_path)
+        st.table(df[["name", "id"]])
