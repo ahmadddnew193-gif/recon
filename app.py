@@ -176,7 +176,9 @@ if "harvester_running" not in st.session_state: st.session_state.harvester_runni
 if "seeder_running" not in st.session_state: st.session_state.seeder_running = False
 if "final_enriched_path" not in st.session_state: st.session_state.final_enriched_path = None
 
-# --- SWARM MONITOR RADAR FEED ---
+
+# --- UPDATED GRAPHICS: EARTH-42 RADIOACTIVE SPIDER CRAWL VISUALIZERS ---
+
 def render_live_crawler_spider_canvas(recent_nodes, buffer_size, total_scraped, active_status="ACTIVE"):
     payload_nodes = [str(n) for n in recent_nodes]
     canvas_html = f"""
@@ -185,7 +187,7 @@ def render_live_crawler_spider_canvas(recent_nodes, buffer_size, total_scraped, 
     <head>
         <style>
             body {{ background-color: #04060a; margin: 0; padding: 0; overflow: hidden; font-family: 'Courier New', monospace; }}
-            #spider-canvas {{ display: block; background: #04060a; border: 2px solid #FF0055; border-radius: 6px; box-shadow: 0 0 15px rgba(255, 0, 85, 0.2); }}
+            #spider-canvas {{ display: block; background: #030508; border: 2px solid #FF0055; border-radius: 6px; box-shadow: 0 0 20px rgba(255, 0, 85, 0.3); }}
         </style>
     </head>
     <body>
@@ -197,65 +199,87 @@ def render_live_crawler_spider_canvas(recent_nodes, buffer_size, total_scraped, 
             const bufferSize = {buffer_size};
             const totalScraped = {total_scraped};
             const engineStatus = "{active_status}";
+            
             let radarAngle = 0;
             const coreX = canvas.width / 2;
             const coreY = canvas.height / 2;
             let visualNodes = [];
 
             recentNodes.forEach((nodeId, index) => {{
-                let angle = (index / Math.max(1, recentNodes.length)) * Math.PI * 2 + (Date.now() * 0.0001);
-                let distance = 90 + (index * 25) % 110;
+                let angle = (index / Math.max(1, recentNodes.length)) * Math.PI * 2 + (Date.now() * 0.00005);
+                let distance = 100 + (index * 20) % 120;
                 visualNodes.push({{ id: nodeId, x: coreX + Math.cos(angle) * distance, y: coreY + Math.sin(angle) * distance }});
             }});
 
-            function drawPixelSpider(ctx, cx, cy, scale, angle, tick) {{
+            function drawEarth42Spider(ctx, cx, cy, angle, tick, isMoving) {{
                 ctx.save();
                 ctx.translate(cx, cy);
                 ctx.rotate(angle);
-                ctx.scale(scale, scale);
-
-                if (Math.random() < 0.08) {{
-                    ctx.translate((Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2);
+                
+                // Chromatic Glitch Aberration
+                if (Math.random() < 0.12) {{
+                    ctx.translate((Math.random() - 0.5) * 3, (Math.random() - 0.5) * 3);
                 }}
 
-                let gl = (Math.random() < 0.15);
-                let primary = gl ? '#FF0055' : '#00FF66';
-                let secondary = gl ? '#00E5FF' : '#D300C5';
+                let neonGreen = "#00FF66";
+                let spiderPink = "#FF0055";
+                let spiderPurple = "#D300C5";
 
-                ctx.fillStyle = primary;
-                ctx.fillRect(-4, -6, 8, 12);
-                ctx.fillStyle = '#04060a';
-                ctx.fillRect(-2, -4, 4, 8);
+                // ABDOMEN (Pixel Art Style)
+                ctx.fillStyle = spiderPink;
+                ctx.fillRect(-10, 2, 20, 22);
+                ctx.fillStyle = "#04060a";
+                ctx.fillRect(-8, 4, 16, 18);
 
-                ctx.fillStyle = secondary;
-                ctx.font = "bold 6px 'Courier New', monospace";
+                // Earth-42 Logo Stamp
+                ctx.fillStyle = neonGreen;
+                ctx.font = "bold 10px monospace";
                 ctx.textAlign = "center";
                 ctx.textBaseline = "middle";
-                ctx.fillText("42", 0, 0);
+                ctx.fillText("42", 0, 13);
 
-                ctx.fillStyle = primary;
-                ctx.fillRect(-3, 6, 6, 4);
+                // CEPHALOTHORAX (Head)
+                ctx.fillStyle = neonGreen;
+                ctx.fillRect(-6, -7, 12, 9);
+                
+                // Multiple Glowing Glowing Eyes
+                ctx.fillStyle = "#FFFFFF";
+                ctx.fillRect(-4, -6, 2, 2);
+                ctx.fillRect(2, -6, 2, 2);
+                ctx.fillStyle = spiderPurple;
+                ctx.fillRect(-2, -4, 1, 1);
+                ctx.fillRect(1, -4, 1, 1);
 
-                ctx.fillStyle = '#FFFFFF';
-                ctx.fillRect(-2, 8, 1, 1); ctx.fillRect(1, 8, 1, 1);
-                ctx.fillRect(-1, 9, 1, 1); ctx.fillRect(0, 9, 1, 1);
-
-                ctx.strokeStyle = primary;
-                ctx.lineWidth = 1.1;
-                let wave = Math.sin(tick * 0.015);
+                // Articulated Bending Legs (Moving with walk-cycle algorithm)
+                let wave = Math.sin(tick * (isMoving ? 0.09 : 0.03));
+                ctx.lineWidth = 2.5;
 
                 for (let i = 0; i < 4; i++) {{
-                    let lAngle = -Math.PI / 6 - (i * 0.3) + (wave * 0.2 * (i % 2 === 0 ? 1 : -1));
-                    ctx.beginPath(); ctx.moveTo(-2, 4 - i * 3);
-                    let lx1 = -6 + Math.cos(lAngle) * 7; let ly1 = (4 - i * 3) + Math.sin(lAngle) * 7;
-                    let lx2 = lx1 - 5; let ly2 = ly1 + 5;
-                    ctx.lineTo(lx1, ly1); ctx.lineTo(lx2, ly2); ctx.stroke();
+                    let phase = i * 0.6;
+                    let moveOffset = Math.sin(tick * 0.05 + phase) * 6;
 
-                    let rAngle = -Math.PI / 6 + (i * 0.3) - (wave * 0.2 * (i % 2 === 0 ? 1 : -1));
-                    ctx.beginPath(); ctx.moveTo(2, 4 - i * 3);
-                    let rx1 = 6 - Math.cos(rAngle) * 7; let ry1 = (4 - i * 3) + Math.sin(rAngle) * 7;
-                    let rx2 = rx1 + 5; let ry2 = ry1 + 5;
-                    ctx.lineTo(rx1, ry1); ctx.lineTo(rx2, ry2); ctx.stroke();
+                    // Left Legs Joint Calculations
+                    ctx.strokeStyle = (i % 2 === 0) ? neonGreen : spiderPink;
+                    ctx.beginPath();
+                    ctx.moveTo(-5, -4 + (i * 4));
+                    let lx1 = -22 - (i * 3) + moveOffset;
+                    let ly1 = -16 + (i * 10) - moveOffset * 0.5;
+                    let lx2 = -36 - (i * 4);
+                    let ly2 = -4 + (i * 12);
+                    ctx.lineTo(lx1, ly1);
+                    ctx.lineTo(lx2, ly2);
+                    ctx.stroke();
+
+                    // Right Legs Joint Calculations
+                    ctx.beginPath();
+                    ctx.moveTo(5, -4 + (i * 4));
+                    let rx1 = 22 + (i * 3) - moveOffset;
+                    let ry1 = -16 + (i * 10) + moveOffset * 0.5;
+                    let rx2 = 36 + (i * 4);
+                    let ry2 = -4 + (i * 12);
+                    ctx.lineTo(rx1, ry1);
+                    ctx.lineTo(rx2, ry2);
+                    ctx.stroke();
                 }}
                 ctx.restore();
             }}
@@ -263,7 +287,8 @@ def render_live_crawler_spider_canvas(recent_nodes, buffer_size, total_scraped, 
             function loop() {{
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
                 
-                ctx.strokeStyle = '#0a0e17';
+                // Matrix Grid Lines
+                ctx.strokeStyle = '#070d14';
                 ctx.lineWidth = 1;
                 for(let x=0; x<canvas.width; x+=40) {{
                     ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); ctx.stroke();
@@ -273,36 +298,38 @@ def render_live_crawler_spider_canvas(recent_nodes, buffer_size, total_scraped, 
                 }}
 
                 let tick = Date.now();
-                for(let r = 50; r < 280; r += 50) {{
-                    ctx.strokeStyle = (Math.random() < 0.04) ? 'rgba(211, 0, 197, 0.2)' : 'rgba(0, 255, 102, 0.04)';
-                    ctx.beginPath(); ctx.arc(coreX, coreY, r + Math.sin(tick*0.001 + r)*3, 0, Math.PI*2); ctx.stroke();
-                }}
 
-                radarAngle += 0.025;
-                let radarX = coreX + Math.cos(radarAngle)*600;
-                let radarY = coreY + Math.sin(radarAngle)*600;
-                let grad = ctx.createLinearGradient(coreX, coreY, radarX, radarY);
-                grad.addColorStop(0, 'rgba(211, 0, 197, 0.35)');
-                grad.addColorStop(0.5, 'rgba(255, 0, 85, 0.08)');
-                grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-                ctx.strokeStyle = grad; ctx.lineWidth = 4;
-                ctx.beginPath(); ctx.moveTo(coreX, coreY); ctx.lineTo(radarX, radarY); ctx.stroke();
-
+                // Cyber Radioactive Silk Web Infrastructure
                 visualNodes.forEach((node) => {{
-                    ctx.strokeStyle = (Math.random() < 0.08) ? 'rgba(255, 0, 85, 0.4)' : 'rgba(0, 229, 255, 0.2)';
-                    ctx.lineWidth = 1;
-                    ctx.beginPath(); ctx.moveTo(coreX, coreY); ctx.lineTo(node.x, node.y); ctx.stroke();
+                    ctx.strokeStyle = (Math.random() < 0.05) ? 'rgba(255, 0, 85, 0.4)' : 'rgba(0, 255, 102, 0.15)';
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath(); 
+                    ctx.moveTo(coreX, coreY); 
+                    ctx.lineTo(node.x, node.y); 
+                    ctx.stroke();
                     
                     ctx.fillStyle = '#00E5FF';
                     ctx.fillRect(node.x - 4, node.y - 4, 8, 8);
                 }});
 
-                drawPixelSpider(ctx, coreX, coreY, 2.2, tick * 0.0008, tick);
+                // Dynamic Radar Sweep
+                radarAngle += 0.02;
+                let rx = coreX + Math.cos(radarAngle)*500;
+                let ry = coreY + Math.sin(radarAngle)*500;
+                let grad = ctx.createLinearGradient(coreX, coreY, rx, ry);
+                grad.addColorStop(0, 'rgba(211, 0, 197, 0.25)');
+                grad.addColorStop(1, 'rgba(0,0,0,0)');
+                ctx.strokeStyle = grad; ctx.lineWidth = 3;
+                ctx.beginPath(); ctx.moveTo(coreX, coreY); ctx.lineTo(rx, ry); ctx.stroke();
 
-                ctx.fillStyle = '#00FF66'; ctx.font = "bold 11px 'Courier New'";
-                ctx.fillText("📡 ALCHEMEX SWARM MONITOR: [" + engineStatus + "]", 20, 25);
+                // Render the Living Spider
+                drawEarth42Spider(ctx, coreX, coreY, tick * 0.0004, tick, true);
+
+                // Interface Terminal Data Overlay
+                ctx.fillStyle = '#00FF66'; ctx.font = "bold 12px 'Courier New'";
+                ctx.fillText("📡 ALCHEMEX SWARM MONITOR: [" + engineStatus + "]", 20, 30);
                 ctx.fillStyle = '#00E5FF';
-                ctx.fillText("📦 NODE DATA: " + totalScraped + " CACHED | ⚡ PIPELINE BUFFER: " + bufferSize + " TARGETS", 20, 45);
+                ctx.fillText("📦 NODE DATA: " + totalScraped + " CACHED | ⚡ PIPELINE BUFFER: " + bufferSize + " TARGETS", 20, 50);
                 requestAnimationFrame(loop);
             }}
             loop();
@@ -312,7 +339,7 @@ def render_live_crawler_spider_canvas(recent_nodes, buffer_size, total_scraped, 
     """
     st.components.v1.html(canvas_html, height=315, scrolling=False)
 
-# --- DYNAMIC CYBER SPIDER WEB PATH VISUALIZER ---
+
 def render_spider_web_path_canvas(enriched_profiles):
     nodes_payload = []
     for idx, node in enumerate(enriched_profiles):
@@ -330,7 +357,7 @@ def render_spider_web_path_canvas(enriched_profiles):
     <head>
         <style>
             body {{ background-color: #04060a; margin: 0; padding: 0; overflow: hidden; font-family: 'Courier New', monospace; }}
-            #web-canvas {{ display: block; border: 2px solid #00E5FF; border-radius: 6px; box-shadow: 0 0 20px rgba(0, 229, 255, 0.15); }}
+            #web-canvas {{ display: block; border: 2px solid #00E5FF; border-radius: 6px; box-shadow: 0 0 25px rgba(0, 229, 255, 0.2); }}
         </style>
     </head>
     <body>
@@ -348,7 +375,7 @@ def render_spider_web_path_canvas(enriched_profiles):
                 pathNodes.forEach((node, idx) => {{
                     let total = pathNodes.length;
                     let angle = (idx / total) * Math.PI * 2 - Math.PI/2;
-                    let distance = 70 + (idx * (170 / Math.max(1, total - 1)));
+                    let distance = 80 + (idx * (160 / Math.max(1, total - 1)));
                     if (total === 1) distance = 0;
                     
                     mappedNodes.push({{
@@ -365,21 +392,20 @@ def render_spider_web_path_canvas(enriched_profiles):
             let currentSegment = 0;
 
             function drawWebBackground() {{
-                ctx.strokeStyle = 'rgba(211, 0, 197, 0.1)';
+                ctx.strokeStyle = 'rgba(211, 0, 197, 0.08)';
                 ctx.lineWidth = 1;
-                const spokeCount = 16;
-                for (let i = 0; i < spokeCount; i++) {{
-                    let a = (i / spokeCount) * Math.PI * 2;
+                const spokes = 16;
+                for (let i = 0; i < spokes; i++) {{
+                    let a = (i / spokes) * Math.PI * 2;
                     ctx.beginPath(); ctx.moveTo(centerX, centerY);
-                    ctx.lineTo(centerX + Math.cos(a) * 450, centerY + Math.sin(a) * 450);
+                    ctx.lineTo(centerX + Math.cos(a) * 500, centerY + Math.sin(a) * 500);
                     ctx.stroke();
                 }}
-
-                for (let r = 50; r <= 350; r += 50) {{
-                    ctx.strokeStyle = 'rgba(0, 229, 255, 0.03)';
+                for (let r = 60; r <= 360; r += 60) {{
+                    ctx.strokeStyle = 'rgba(0, 229, 255, 0.04)';
                     ctx.beginPath();
-                    for (let j = 0; j <= spokeCount; j++) {{
-                        let a = (j / spokeCount) * Math.PI * 2;
+                    for (let j = 0; j <= spokes; j++) {{
+                        let a = (j / spokes) * Math.PI * 2;
                         let x = centerX + Math.cos(a) * r; let y = centerY + Math.sin(a) * r;
                         if (j === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
                     }}
@@ -387,47 +413,63 @@ def render_spider_web_path_canvas(enriched_profiles):
                 }}
             }}
 
-            function drawPixelSpider(ctx, cx, cy, scale, angle, tick) {{
+            function drawEarth42Spider(ctx, cx, cy, angle, tick, isMoving) {{
                 ctx.save();
                 ctx.translate(cx, cy);
                 ctx.rotate(angle);
-                ctx.scale(scale, scale);
-
-                if (Math.random() < 0.08) {{
+                
+                if (Math.random() < 0.1) {{
                     ctx.translate((Math.random() - 0.5) * 2, (Math.random() - 0.5) * 2);
                 }}
 
-                let gl = (Math.random() < 0.15);
-                let primary = gl ? '#FF0055' : '#00FF66';
-                let secondary = gl ? '#00E5FF' : '#D300C5';
+                let neonGreen = "#00FF66";
+                let spiderPink = "#FF0055";
+                let spiderPurple = "#D300C5";
 
-                ctx.fillStyle = primary; ctx.fillRect(-4, -6, 8, 12);
-                ctx.fillStyle = '#04060a'; ctx.fillRect(-2, -4, 4, 8);
+                // ABDOMEN
+                ctx.fillStyle = spiderPink;
+                ctx.fillRect(-8, 2, 16, 18);
+                ctx.fillStyle = "#04060a";
+                ctx.fillRect(-6, 4, 12, 14);
 
-                ctx.fillStyle = secondary;
-                ctx.font = "bold 6px 'Courier New', monospace";
-                ctx.textAlign = "center"; ctx.textBaseline = "middle";
-                ctx.fillText("42", 0, 0);
+                // 42 Logo
+                ctx.fillStyle = neonGreen;
+                ctx.font = "bold 8px monospace";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                ctx.fillText("42", 0, 11);
 
-                ctx.fillStyle = primary; ctx.fillRect(-3, 6, 6, 4);
-                ctx.fillStyle = '#FFFFFF';
-                ctx.fillRect(-2, 8, 1, 1); ctx.fillRect(1, 8, 1, 1);
+                // HEAD
+                ctx.fillStyle = neonGreen;
+                ctx.fillRect(-5, -6, 10, 8);
+                
+                ctx.fillStyle = "#FFFFFF";
+                ctx.fillRect(-3, -5, 1.5, 1.5);
+                ctx.fillRect(1.5, -5, 1.5, 1.5);
 
-                ctx.strokeStyle = primary; ctx.lineWidth = 1.1;
-                let wave = Math.sin(tick * 0.025);
+                // Moving legs cycle
+                let wave = Math.sin(tick * (isMoving ? 0.15 : 0.03));
+                ctx.lineWidth = 2;
 
                 for (let i = 0; i < 4; i++) {{
-                    let lAngle = -Math.PI / 6 - (i * 0.3) + (wave * 0.2 * (i % 2 === 0 ? 1 : -1));
-                    ctx.beginPath(); ctx.moveTo(-2, 4 - i * 3);
-                    let lx1 = -6 + Math.cos(lAngle) * 7; let ly1 = (4 - i * 3) + Math.sin(lAngle) * 7;
-                    let lx2 = lx1 - 5; let ly2 = ly1 + 5;
-                    ctx.lineTo(lx1, ly1); ctx.lineTo(lx2, ly2); ctx.stroke();
+                    let phase = i * 0.5;
+                    let legFactor = Math.sin(tick * 0.1 + phase) * 5;
 
-                    let rAngle = -Math.PI / 6 + (i * 0.3) - (wave * 0.2 * (i % 2 === 0 ? 1 : -1));
-                    ctx.beginPath(); ctx.moveTo(2, 4 - i * 3);
-                    let rx1 = 6 - Math.cos(rAngle) * 7; let ry1 = (4 - i * 3) + Math.sin(rAngle) * 7;
-                    let rx2 = rx1 + 5; let ry2 = ry1 + 5;
-                    ctx.lineTo(rx1, ry1); ctx.lineTo(rx2, ry2); ctx.stroke();
+                    ctx.strokeStyle = (i % 2 === 0) ? neonGreen : spiderPink;
+                    
+                    // Left leg bend
+                    ctx.beginPath();
+                    ctx.moveTo(-4, -3 + (i * 3.5));
+                    ctx.lineTo(-18 - (i * 2) + legFactor, -12 + (i * 8) - legFactor * 0.5);
+                    ctx.lineTo(-30 - (i * 3), -2 + (i * 10));
+                    ctx.stroke();
+
+                    // Right leg bend
+                    ctx.beginPath();
+                    ctx.moveTo(4, -3 + (i * 3.5));
+                    ctx.lineTo(18 + (i * 2) - legFactor, -12 + (i * 8) + legFactor * 0.5);
+                    ctx.lineTo(30 + (i * 3), -2 + (i * 10));
+                    ctx.stroke();
                 }}
                 ctx.restore();
             }}
@@ -436,8 +478,9 @@ def render_spider_web_path_canvas(enriched_profiles):
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
                 drawWebBackground();
 
+                // Draw Path Connection Links
                 if (mappedNodes.length > 1) {{
-                    ctx.strokeStyle = '#FF0055'; ctx.lineWidth = 2;
+                    ctx.strokeStyle = '#FF0055'; ctx.lineWidth = 3;
                     ctx.beginPath();
                     mappedNodes.forEach((node, idx) => {{
                         if (idx === 0) ctx.moveTo(node.x, node.y);
@@ -446,32 +489,28 @@ def render_spider_web_path_canvas(enriched_profiles):
                     ctx.stroke();
                 }}
 
+                // Draw User Identity Blueprint Nodes
                 mappedNodes.forEach((node) => {{
-                    let gx = (Math.random() < 0.04) ? (Math.random()-0.5)*3 : 0;
-                    let gy = (Math.random() < 0.04) ? (Math.random()-0.5)*3 : 0;
-
                     ctx.fillStyle = '#050a12';
-                    ctx.fillRect(node.x - 24 + gx, node.y - 15 + gy, 48, 30);
+                    ctx.fillRect(node.x - 25, node.y - 15, 50, 30);
 
-                    if (node.isBanned) {{
-                        ctx.strokeStyle = '#FF0055'; ctx.lineWidth = 2;
-                    }} else if (node.role === 'START') {{
-                        ctx.strokeStyle = '#00FF66'; ctx.lineWidth = 2;
-                    }} else if (node.role === 'TARGET') {{
-                        ctx.strokeStyle = '#00E5FF'; ctx.lineWidth = 2;
-                    }} else {{
-                        ctx.strokeStyle = '#D300C5'; ctx.lineWidth = 1;
-                    }}
-                    ctx.strokeRect(node.x - 24 + gx, node.y - 15 + gy, 48, 30);
+                    if (node.isBanned) ctx.strokeStyle = '#FF0055';
+                    else if (node.role === 'START') ctx.strokeStyle = '#00FF66';
+                    else if (node.role === 'TARGET') ctx.strokeStyle = '#00E5FF';
+                    else ctx.strokeStyle = '#D300C5';
+                    
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(node.x - 25, node.y - 15, 50, 30);
 
                     ctx.fillStyle = '#FFFFFF'; ctx.font = "8px 'Courier New'"; ctx.textAlign = "center";
-                    ctx.fillText(node.name.substring(0, 8), node.x + gx, node.y - 2 + gy);
-                    ctx.fillStyle = 'rgba(0, 229, 255, 0.6)';
-                    ctx.fillText(node.id.substring(0, 7), node.x + gx, node.y + 8 + gy);
+                    ctx.fillText(node.name.substring(0, 8), node.x, node.y - 2);
+                    ctx.fillStyle = 'rgba(0, 229, 255, 0.7)';
+                    ctx.fillText(node.id.substring(0, 7), node.x, node.y + 8);
                 }});
 
+                // Animate Spider along Node Trace Routes
                 if (mappedNodes.length > 1) {{
-                    spiderProgress += 0.012;
+                    spiderProgress += 0.01;
                     if (spiderProgress >= 1.0) {{
                         spiderProgress = 0.0;
                         currentSegment = (currentSegment + 1) % (mappedNodes.length - 1);
@@ -479,15 +518,15 @@ def render_spider_web_path_canvas(enriched_profiles):
                     let p1 = mappedNodes[currentSegment];
                     let p2 = mappedNodes[currentSegment + 1];
                     if (p1 && p2) {{
-                        let spiderX = p1.x + (p2.x - p1.x) * spiderProgress;
-                        let spiderY = p1.y + (p2.y - p1.y) * spiderProgress;
+                        let sx = p1.x + (p2.x - p1.x) * spiderProgress;
+                        let sy = p1.y + (p2.y - p1.y) * spiderProgress;
                         let angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
-                        drawPixelSpider(ctx, spiderX, spiderY, 1.8, angle - Math.PI/2, Date.now());
+                        drawEarth42Spider(ctx, sx, sy, angle - Math.PI/2, Date.now(), true);
                     }}
                 }}
 
                 ctx.fillStyle = '#FF0055'; ctx.font = "bold 12px 'Courier New'";
-                ctx.fillText("🕸️ DIMENSIONAL EARTH-42 TRACEWAY MATRIX DISCOVERY", 20, 30);
+                ctx.fillText("🕸️ DIMENSIONAL EARTH-42 TRACEWAY MATRIX NETWORK DISCOVERY", 20, 30);
                 requestAnimationFrame(loop);
             }}
             loop();
@@ -497,7 +536,8 @@ def render_spider_web_path_canvas(enriched_profiles):
     """
     st.components.v1.html(web_html, height=515, scrolling=False)
 
-# --- BACKBONE CORE ALGORITHMIC ENGINE ---
+# --- BACKEND PIPELINE WORKFLOW LOGIC (UNTOUCHED) ---
+
 async def proxy_worker_task(worker_id, pool_manager, network_queue, cache_queue, start_visited, target_visited, path_found_event, results_container, session):
     g_cache = st.session_state.global_cache
     while not path_found_event.is_set() and st.session_state.running:
