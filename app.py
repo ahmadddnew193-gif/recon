@@ -177,7 +177,9 @@ if "seeder_running" not in st.session_state: st.session_state.seeder_running = F
 if "final_enriched_path" not in st.session_state: st.session_state.final_enriched_path = None
 
 
-# --- UPDATED GRAPHICS: EARTH-42 RADIOACTIVE SPIDER CRAWL VISUALIZERS ---
+# =========================================================================
+# 🕷️ GRAPHICS OVERHAUL BLOCK: EARTH-42 RADIOACTIVE SPIDER ENGINE VISUALIZERS
+# =========================================================================
 
 def render_live_crawler_spider_canvas(recent_nodes, buffer_size, total_scraped, active_status="ACTIVE"):
     payload_nodes = [str(n) for n in recent_nodes]
@@ -242,7 +244,7 @@ def render_live_crawler_spider_canvas(recent_nodes, buffer_size, total_scraped, 
                 ctx.fillStyle = neonGreen;
                 ctx.fillRect(-6, -7, 12, 9);
                 
-                // Multiple Glowing Glowing Eyes
+                // Multiple Glowing Eyes
                 ctx.fillStyle = "#FFFFFF";
                 ctx.fillRect(-4, -6, 2, 2);
                 ctx.fillRect(2, -6, 2, 2);
@@ -536,7 +538,9 @@ def render_spider_web_path_canvas(enriched_profiles):
     """
     st.components.v1.html(web_html, height=515, scrolling=False)
 
-# --- BACKEND PIPELINE WORKFLOW LOGIC (UNTOUCHED) ---
+# =========================================================================
+# END OF GRAPHICS BLOCK - REST OF THE FILE UNTOUCHED BELOW THIS LINE
+# =========================================================================
 
 async def proxy_worker_task(worker_id, pool_manager, network_queue, cache_queue, start_visited, target_visited, path_found_event, results_container, session):
     g_cache = st.session_state.global_cache
