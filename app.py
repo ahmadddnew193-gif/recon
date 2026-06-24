@@ -197,40 +197,81 @@ def render_live_crawler_spider_canvas(recent_nodes, buffer_size, total_scraped, 
             const bufferSize = {buffer_size};
             const totalScraped = {total_scraped};
             const engineStatus = "{active_status}";
-
             let radarAngle = 0;
             const coreX = canvas.width / 2;
             const coreY = canvas.height / 2;
             let visualNodes = [];
-
             recentNodes.forEach((nodeId, index) => {{
                 let angle = (index / Math.max(1, recentNodes.length)) * Math.PI * 2 + (Date.now() * 0.0001);
                 let distance = 90 + (index * 20) % 80;
                 visualNodes.push({{ id: nodeId, x: coreX + Math.cos(angle) * distance, y: coreY + Math.sin(angle) * distance }});
             }});
 
+            function drawPixelSpider(context, x, y, angle, scale, isFrameA, color, eyeColor) {{
+                context.save();
+                context.translate(x, y);
+                context.rotate(angle);
+                const p = scale;
+                context.fillStyle = color;
+                context.fillRect(-5*p, -3*p, 6*p, 6*p);
+                context.fillRect(-6*p, -2*p, 8*p, 4*p);
+                context.fillRect(2*p, -2*p, 4*p, 4*p);
+                context.fillRect(1*p, -1*p, 6*p, 2*p);
+                context.fillStyle = eyeColor;
+                context.fillRect(4*p, -2*p, p, p);
+                context.fillRect(4*p, 1*p, p, p);
+                context.fillStyle = color;
+                if (isFrameA) {{
+                    context.fillRect(2*p, -5*p, p, 3*p); context.fillRect(3*p, -6*p, 2*p, p);
+                    context.fillRect(2*p, 3*p, p, 3*p);  context.fillRect(3*p, 5*p, 2*p, p);
+                    context.fillRect(0, -5*p, p, 3*p); context.fillRect(-1*p, -6*p, 2*p, p);
+                    context.fillRect(0, 3*p, p, 3*p);  context.fillRect(-1*p, 5*p, 2*p, p);
+                    context.fillRect(-2*p, -5*p, p, 3*p); context.fillRect(-4*p, -6*p, 3*p, p);
+                    context.fillRect(-2*p, 3*p, p, 3*p);  context.fillRect(-4*p, 5*p, 3*p, p);
+                    context.fillRect(-4*p, -4*p, p, 2*p); context.fillRect(-6*p, -5*p, 3*p, p);
+                    context.fillRect(-4*p, 2*p, p, 2*p);  context.fillRect(-6*p, 4*p, 3*p, p);
+                }} else {{
+                    context.fillRect(2*p, -4*p, p, 2*p); context.fillRect(3*p, -5*p, 3*p, p);
+                    context.fillRect(2*p, 2*p, p, 2*p);  context.fillRect(3*p, 4*p, 3*p, p);
+                    context.fillRect(0, -4*p, p, 2*p); context.fillRect(0, -5*p, 2*p, p);
+                    context.fillRect(0, 2*p, p, 2*p);  context.fillRect(0, 4*p, 2*p, p);
+                    context.fillRect(-2*p, -4*p, p, 2*p); context.fillRect(-3*p, -5*p, 2*p, p);
+                    context.fillRect(-2*p, 2*p, p, 2*p);  context.fillRect(-3*p, 4*p, 2*p, p);
+                    context.fillRect(-4*p, -5*p, p, 3*p); context.fillRect(-7*p, -6*p, 4*p, p);
+                    context.fillRect(-4*p, 3*p, p, 3*p);  context.fillRect(-7*p, 5*p, 4*p, p);
+                }}
+                context.restore();
+            }}
+
             function loop() {{
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
                 ctx.strokeStyle = '#0d151f';
+                ctx.lineWidth = 2;
                 for(let r = 40; r < 300; r += 40) {{
-                    ctx.beginPath(); ctx.arc(coreX, coreY, r, 0, Math.PI*2); ctx.stroke();
+                    ctx.strokeRect(coreX - r, coreY - r, r * 2, r * 2);
                 }}
 
                 radarAngle += 0.02;
-                ctx.strokeStyle = 'rgba(0, 255, 102, 0.08)';
+                ctx.strokeStyle = 'rgba(0, 255, 102, 0.15)';
+                ctx.lineWidth = 3;
                 ctx.beginPath(); ctx.moveTo(coreX, coreY);
                 ctx.lineTo(coreX + Math.cos(radarAngle)*600, coreY + Math.sin(radarAngle)*600);
                 ctx.stroke();
-
+                
                 visualNodes.forEach((node) => {{
-                    ctx.strokeStyle = 'rgba(0, 229, 255, 0.3)';
+                    ctx.strokeStyle = 'rgba(0, 229, 255, 0.4)';
+                    ctx.lineWidth = 1;
                     ctx.beginPath(); ctx.moveTo(coreX, coreY); ctx.lineTo(node.x, node.y); ctx.stroke();
                     ctx.fillStyle = '#00E5FF';
-                    ctx.fillRect(node.x - 3, node.y - 3, 6, 6);
+                    ctx.fillRect(node.x - 4, node.y - 4, 8, 8);
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(node.x - 1, node.y - 1, 2, 2);
                 }});
-
+                
+                let isFrameA = (Math.floor(Date.now() / 250) % 2 === 0);
+                drawPixelSpider(ctx, coreX, coreY, Date.now() * 0.001, 2.5, isFrameA, '#00FF66', '#ffffff');
+                
                 ctx.fillStyle = '#00FF66';
-                ctx.fillRect(coreX - 6, coreY - 6, 12, 12);
                 ctx.font = "bold 11px 'Courier New'";
                 ctx.fillText("📡 SWARM MONITOR: [" + engineStatus + "]", 20, 25);
                 ctx.fillStyle = '#00E5FF';
@@ -274,12 +315,10 @@ def render_spider_web_path_canvas(enriched_profiles):
             const pathNodes = {json.dumps(nodes_payload)};
             const centerX = canvas.width / 2;
             const centerY = canvas.height / 2;
-
             let mappedNodes = [];
             if (pathNodes.length > 0) {{
                 pathNodes.forEach((node, idx) => {{
                     let total = pathNodes.length;
-                    // Distribute nodes outward in a spiral pattern matching radial strands
                     let angle = (idx / total) * Math.PI * 2 - Math.PI/2;
                     let distance = 70 + (idx * (160 / Math.max(1, total - 1)));
                     if (total === 1) distance = 0;
@@ -297,11 +336,46 @@ def render_spider_web_path_canvas(enriched_profiles):
             let spiderProgress = 0.0;
             let currentSegment = 0;
 
+            function drawPixelSpider(context, x, y, angle, scale, isFrameA, color, eyeColor) {{
+                context.save();
+                context.translate(x, y);
+                context.rotate(angle);
+                const p = scale;
+                context.fillStyle = color;
+                context.fillRect(-5*p, -3*p, 6*p, 6*p);
+                context.fillRect(-6*p, -2*p, 8*p, 4*p);
+                context.fillRect(2*p, -2*p, 4*p, 4*p);
+                context.fillRect(1*p, -1*p, 6*p, 2*p);
+                context.fillStyle = eyeColor;
+                context.fillRect(4*p, -2*p, p, p);
+                context.fillRect(4*p, 1*p, p, p);
+                context.fillStyle = color;
+                if (isFrameA) {{
+                    context.fillRect(2*p, -5*p, p, 3*p); context.fillRect(3*p, -6*p, 2*p, p);
+                    context.fillRect(2*p, 3*p, p, 3*p);  context.fillRect(3*p, 5*p, 2*p, p);
+                    context.fillRect(0, -5*p, p, 3*p); context.fillRect(-1*p, -6*p, 2*p, p);
+                    context.fillRect(0, 3*p, p, 3*p);  context.fillRect(-1*p, 5*p, 2*p, p);
+                    context.fillRect(-2*p, -5*p, p, 3*p); context.fillRect(-4*p, -6*p, 3*p, p);
+                    context.fillRect(-2*p, 3*p, p, 3*p);  context.fillRect(-4*p, 5*p, 3*p, p);
+                    context.fillRect(-4*p, -4*p, p, 2*p); context.fillRect(-6*p, -5*p, 3*p, p);
+                    context.fillRect(-4*p, 2*p, p, 2*p);  context.fillRect(-6*p, 4*p, 3*p, p);
+                }} else {{
+                    context.fillRect(2*p, -4*p, p, 2*p); context.fillRect(3*p, -5*p, 3*p, p);
+                    context.fillRect(2*p, 2*p, p, 2*p);  context.fillRect(3*p, 4*p, 3*p, p);
+                    context.fillRect(0, -4*p, p, 2*p); context.fillRect(0, -5*p, 2*p, p);
+                    context.fillRect(0, 2*p, p, 2*p);  context.fillRect(0, 4*p, 2*p, p);
+                    context.fillRect(-2*p, -4*p, p, 2*p); context.fillRect(-3*p, -5*p, 2*p, p);
+                    context.fillRect(-2*p, 2*p, p, 2*p);  context.fillRect(-3*p, 4*p, 2*p, p);
+                    context.fillRect(-4*p, -5*p, p, 3*p); context.fillRect(-7*p, -6*p, 4*p, p);
+                    context.fillRect(-4*p, 3*p, p, 3*p);  context.fillRect(-7*p, 5*p, 4*p, p);
+                }}
+                context.restore();
+            }}
+
             function drawWebBackground() {{
                 ctx.strokeStyle = '#121e30';
-                ctx.lineWidth = 1;
+                ctx.lineWidth = 1.5;
                 
-                // 1. Structural spokes radiating from the absolute center
                 const spokeCount = 12;
                 for (let i = 0; i < spokeCount; i++) {{
                     let a = (i / spokeCount) * Math.PI * 2;
@@ -311,58 +385,15 @@ def render_spider_web_path_canvas(enriched_profiles):
                     ctx.stroke();
                 }}
 
-                // 2. Concentric octagonal web rings
                 ctx.strokeStyle = '#0a1424';
                 for (let r = 40; r <= 280; r += 40) {{
-                    ctx.beginPath();
-                    for (let j = 0; j <= 8; j++) {{
-                        let a = (j / 8) * Math.PI * 2;
-                        let x = centerX + Math.cos(a) * r;
-                        let y = centerY + Math.sin(a) * r;
-                        if (j === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-                    }}
-                    ctx.closePath();
-                    ctx.stroke();
+                    ctx.strokeRect(centerX - r, centerY - r, r * 2, r * 2);
                 }}
             }}
 
             function drawSpiderEntity(x, y, angle) {{
-                ctx.save();
-                ctx.translate(x, y);
-                ctx.rotate(angle);
-                
-                // Draw Spider Body
-                ctx.fillStyle = '#00FF66';
-                ctx.beginPath();
-                ctx.arc(0, 0, 7, 0, Math.PI * 2); // Abdomen
-                ctx.arc(6, 0, 4, 0, Math.PI * 2); // Cephalothorax
-                ctx.fill();
-
-                // Draw Spider Eyes
-                ctx.fillStyle = '#ffffff';
-                ctx.fillRect(7, -2, 2, 2);
-                ctx.fillRect(7, 1, 2, 2);
-
-                // Draw Animated Spider Legs
-                ctx.strokeStyle = '#00FF66';
-                ctx.lineWidth = 1.5;
-                let legCycle = Math.sin(Date.now() * 0.02);
-                
-                for (let i = 0; i < 4; i++) {{
-                    let offset = (i - 1.5) * 0.4;
-                    // Left Side Legs
-                    ctx.beginPath();
-                    ctx.moveTo(2, -2);
-                    ctx.quadraticCurveTo(-5 + (legCycle * 3), -12 + offset * 5, -12, -10 + offset * 8);
-                    ctx.stroke();
-
-                    // Right Side Legs
-                    ctx.beginPath();
-                    ctx.moveTo(2, 2);
-                    ctx.quadraticCurveTo(-5 + (legCycle * 3), 12 + offset * 5, -12, 10 + offset * 8);
-                    ctx.stroke();
-                }}
-                ctx.restore();
+                let isFrameA = (Math.floor(Date.now() / 150) % 2 === 0);
+                drawPixelSpider(ctx, x, y, angle, 2.0, isFrameA, '#00FF66', '#ffffff');
             }}
 
             function loop() {{
@@ -371,7 +402,6 @@ def render_spider_web_path_canvas(enriched_profiles):
 
                 if (mappedNodes.length === 0) return;
 
-                // Draw Neon Green connection link strands
                 ctx.strokeStyle = 'rgba(0, 229, 255, 0.65)';
                 ctx.lineWidth = 2;
                 ctx.beginPath();
@@ -381,32 +411,32 @@ def render_spider_web_path_canvas(enriched_profiles):
                 }});
                 ctx.stroke();
 
-                // Draw Intersecting Target Nodes
                 mappedNodes.forEach((node) => {{
-                    ctx.beginPath();
-                    ctx.arc(node.x, node.y, 6, 0, Math.PI * 2);
+                    const nSize = 6;
                     
                     if (node.role === "START") ctx.fillStyle = '#00FF66';
                     else if (node.role === "TARGET") ctx.fillStyle = '#FF0055';
                     else ctx.fillStyle = '#00E5FF';
                     
                     if (node.isBanned) ctx.fillStyle = '#7f0000';
-                    ctx.fill();
+                    
+                    ctx.fillRect(node.x - nSize, node.y - nSize, nSize * 2, nSize * 2);
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(node.x - 2, node.y - 2, 4, 4);
 
                     ctx.strokeStyle = '#ffffff';
                     ctx.lineWidth = 1;
-                    ctx.beginPath(); ctx.arc(node.x, node.y, 10, 0, Math.PI * 2); ctx.stroke();
+                    ctx.strokeRect(node.x - 9, node.y - 9, 18, 18);
 
-                    // Details text layout
                     ctx.fillStyle = '#ffffff';
                     ctx.font = "bold 10px 'Courier New'";
                     ctx.fillText(`[${{node.role}}] ${{node.name}}`, node.x + 14, node.y - 3);
+  
                     ctx.fillStyle = 'rgba(255,255,255,0.6)';
                     ctx.font = "9px 'Courier New'";
                     ctx.fillText(`ID: ${{node.id}}`, node.x + 14, node.y + 8);
                 }});
 
-                // Spider Navigation Matrix Loop
                 if (mappedNodes.length > 1) {{
                     spiderProgress += 0.012;
                     if (spiderProgress >= 1.0) {{
@@ -421,7 +451,6 @@ def render_spider_web_path_canvas(enriched_profiles):
                         let spiderX = p1.x + (p2.x - p1.x) * spiderProgress;
                         let spiderY = p1.y + (p2.y - p1.y) * spiderProgress;
                         let angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
-
                         drawSpiderEntity(spiderX, spiderY, angle);
                     }}
                 }}
@@ -462,7 +491,7 @@ with tab1:
     c1, c2 = st.columns(2)
     with c1: s_input = st.text_input("Start Profile ID:", "1703896246")
     with c2: t_input = st.text_input("Target Profile ID:", "140671171")
-        
+         
     btn_col1, btn_col2 = st.columns(2)
     with btn_col1: start_btn = st.button("🚀 Ignite Pipeline Swarm", use_container_width=True, type="primary")
     with btn_col2: stop_btn = st.button("🛑 Kill Pipeline Tasks", use_container_width=True)
@@ -486,7 +515,6 @@ with tab1:
         with graph_placeholder:
             render_spider_web_path_canvas(st.session_state.final_enriched_path)
         
-        # Display explicit readable path list directly on text matrix layout
         st.markdown("#### 🎯 Linked Path Connection Sequence Details")
         df_path = pd.DataFrame(st.session_state.final_enriched_path)
         st.dataframe(df_path[["id", "name", "created", "isBanned"]], use_container_width=True)
@@ -693,7 +721,7 @@ if start_btn and s_input.isdigit() and t_input.isdigit():
     pool_mgr = ProxyPool(proxy_input)
     if pool_mgr.proxies:
         st.session_state.running = True
-        st.session_state.final_enriched_path = None # Clear old data before searching
+        st.session_state.final_enriched_path = None 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(master_pipeline_engine(int(s_input), int(t_input), pool_mgr))
@@ -710,7 +738,7 @@ with tab2:
     hbtn1, hbtn2 = st.columns(2)
     with hbtn1: start_harvest_btn = st.button("⚡ Ignite Crawler", use_container_width=True, type="primary", key="harvest_start")
     with hbtn2: stop_harvest_btn = st.button("🛑 Stop Harvester", use_container_width=True, key="harvest_stop")
-        
+         
     if stop_harvest_btn:
         st.session_state.harvester_running = False
         st.rerun()
@@ -841,7 +869,7 @@ with tab3:
                 friends = await seed_worker_pipeline(uid, pool_manager, session, shared_metrics)
                 layer2_queue.extend(friends)
                 await asyncio.sleep(0.1)
-                
+               
             layer2_queue = list(set([uid for uid in layer2_queue if str(uid) not in g_cache]))
             random.shuffle(layer2_queue)
             for idx, l2_uid in enumerate(layer2_queue[:max_l2]):
