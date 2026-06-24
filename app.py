@@ -200,125 +200,78 @@ def render_live_crawler_spider_canvas(recent_nodes, buffer_size, total_scraped, 
             let radarAngle = 0;
             const coreX = canvas.width / 2;
             const coreY = canvas.height / 2;
-            let startTime = Date.now();
             let visualNodes = [];
-            
             recentNodes.forEach((nodeId, index) => {{
-                let angle = (index / Math.max(1, recentNodes.length)) * Math.PI * 2;
-                let distance = 80 + (index * 25) % 120;
-                let y3d = -30 + (index * 15) % 60;
-                visualNodes.push({{ id: nodeId, x3d: Math.cos(angle) * distance, y3d: y3d, z3d: Math.sin(angle) * distance, index: index }});
+                let angle = (index / Math.max(1, recentNodes.length)) * Math.PI * 2 + (Date.now() * 0.0001);
+                let distance = 90 + (index * 20) % 80;
+                visualNodes.push({{ id: nodeId, x: coreX + Math.cos(angle) * distance, y: coreY + Math.sin(angle) * distance }});
             }});
 
-            function project3D(x, y, z, rotX, rotY) {{
-                let cosY = Math.cos(rotY), sinY = Math.sin(rotY);
-                let x1 = x * cosY - z * sinY;
-                let z1 = x * sinY + z * cosY;
-                
-                let cosX = Math.cos(rotX), sinX = Math.sin(rotX);
-                let y2 = y * cosX - z1 * sinX;
-                let z2 = y * sinX + z1 * cosX;
-                
-                let perspective = 400;
-                let scale = perspective / (perspective + z2);
-                return {{
-                    x: coreX + x1 * scale,
-                    y: coreY + y2 * scale
-                }};
-            }}
-
-            function draw3DWebBackground(rotX, rotY) {{
-                ctx.strokeStyle = '#0d151f';
-                ctx.lineWidth = 1;
-                for (let r = 40; r <= 240; r += 40) {{
-                    ctx.beginPath();
-                    for (let j = 0; j <= 24; j++) {{
-                        let a = (j / 24) * Math.PI * 2;
-                        let p = project3D(Math.cos(a) * r, 0, Math.sin(a) * r, rotX, rotY);
-                        if (j === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
-                    }}
-                    ctx.stroke();
+            function drawPixelSpider(context, x, y, angle, scale, isFrameA, color, eyeColor) {{
+                context.save();
+                context.translate(x, y);
+                context.rotate(angle);
+                const p = scale;
+                context.fillStyle = color;
+                context.fillRect(-5*p, -3*p, 6*p, 6*p);
+                context.fillRect(-6*p, -2*p, 8*p, 4*p);
+                context.fillRect(2*p, -2*p, 4*p, 4*p);
+                context.fillRect(1*p, -1*p, 6*p, 2*p);
+                context.fillStyle = eyeColor;
+                context.fillRect(4*p, -2*p, p, p);
+                context.fillRect(4*p, 1*p, p, p);
+                context.fillStyle = color;
+                if (isFrameA) {{
+                    context.fillRect(2*p, -5*p, p, 3*p); context.fillRect(3*p, -6*p, 2*p, p);
+                    context.fillRect(2*p, 3*p, p, 3*p);  context.fillRect(3*p, 5*p, 2*p, p);
+                    context.fillRect(0, -5*p, p, 3*p); context.fillRect(-1*p, -6*p, 2*p, p);
+                    context.fillRect(0, 3*p, p, 3*p);  context.fillRect(-1*p, 5*p, 2*p, p);
+                    context.fillRect(-2*p, -5*p, p, 3*p); context.fillRect(-4*p, -6*p, 3*p, p);
+                    context.fillRect(-2*p, 3*p, p, 3*p);  context.fillRect(-4*p, 5*p, 3*p, p);
+                    context.fillRect(-4*p, -4*p, p, 2*p); context.fillRect(-6*p, -5*p, 3*p, p);
+                    context.fillRect(-4*p, 2*p, p, 2*p);  context.fillRect(-6*p, 4*p, 3*p, p);
+                }} else {{
+                    context.fillRect(2*p, -4*p, p, 2*p); context.fillRect(3*p, -5*p, 3*p, p);
+                    context.fillRect(2*p, 2*p, p, 2*p);  context.fillRect(3*p, 4*p, 3*p, p);
+                    context.fillRect(0, -4*p, p, 2*p); context.fillRect(0, -5*p, 2*p, p);
+                    context.fillRect(0, 2*p, p, 2*p);  context.fillRect(0, 4*p, 2*p, p);
+                    context.fillRect(-2*p, -4*p, p, 2*p); context.fillRect(-3*p, -5*p, 2*p, p);
+                    context.fillRect(-2*p, 2*p, p, 2*p);  context.fillRect(-3*p, 4*p, 2*p, p);
+                    context.fillRect(-4*p, -5*p, p, 3*p); context.fillRect(-7*p, -6*p, 4*p, p);
+                    context.fillRect(-4*p, 3*p, p, 3*p);  context.fillRect(-7*p, 5*p, 4*p, p);
                 }}
-                for (let j = 0; j < 12; j++) {{
-                    let a = (j / 12) * Math.PI * 2;
-                    let pStart = project3D(0, 0, 0, rotX, rotY);
-                    let pEnd = project3D(Math.cos(a) * 240, 0, Math.sin(a) * 240, rotX, rotY);
-                    ctx.beginPath();
-                    ctx.moveTo(pStart.x, pStart.y);
-                    ctx.lineTo(pEnd.x, pEnd.y);
-                    ctx.stroke();
-                }}
+                context.restore();
             }}
 
             function loop() {{
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
-                
-                let elapsed = Date.now() - startTime;
-                let rotY = elapsed * 0.0003;
-                let rotX = 0.5 + Math.sin(elapsed * 0.0002) * 0.1;
-                
-                draw3DWebBackground(rotX, rotY);
+                ctx.strokeStyle = '#0d151f';
+                ctx.lineWidth = 2;
+                for(let r = 40; r < 300; r += 40) {{
+                    ctx.strokeRect(coreX - r, coreY - r, r * 2, r * 2);
+                }}
 
                 radarAngle += 0.02;
-                let pCore = project3D(0, 0, 0, rotX, rotY);
-                let pRadar = project3D(Math.cos(radarAngle) * 240, 0, Math.sin(radarAngle) * 240, rotX, rotY);
                 ctx.strokeStyle = 'rgba(0, 255, 102, 0.15)';
-                ctx.lineWidth = 2;
-                ctx.beginPath();
-                ctx.moveTo(pCore.x, pCore.y);
-                ctx.lineTo(pRadar.x, pRadar.y);
+                ctx.lineWidth = 3;
+                ctx.beginPath(); ctx.moveTo(coreX, coreY);
+                ctx.lineTo(coreX + Math.cos(radarAngle)*600, coreY + Math.sin(radarAngle)*600);
                 ctx.stroke();
-
-                visualNodes.forEach((node, idx) => {{
-                    let pNode = project3D(node.x3d, node.y3d, node.z3d, rotX, rotY);
-                    let nodeDelay = idx * 100;
-                    let nodeProgress = Math.max(0, Math.min(1, (elapsed - nodeDelay) / 500));
-                    
-                    if (nodeProgress > 0) {{
-                        let currentX = pCore.x + (pNode.x - pCore.x) * nodeProgress;
-                        let currentY = pCore.y + (pNode.y - pCore.y) * nodeProgress;
-                        
-                        ctx.strokeStyle = 'rgba(0, 229, 255, 0.4)';
-                        ctx.lineWidth = 1.5;
-                        ctx.beginPath();
-                        ctx.moveTo(pCore.x, pCore.y);
-                        ctx.lineTo(currentX, currentY);
-                        ctx.stroke();
-                        
-                        if (idx > 0) {{
-                            let prevNode = visualNodes[idx - 1];
-                            let pPrev = project3D(prevNode.x3d, prevNode.y3d, prevNode.z3d, rotX, rotY);
-                            let prevX = pPrev.x + (pNode.x - pPrev.x) * nodeProgress;
-                            let prevY = pPrev.y + (pNode.y - pPrev.y) * nodeProgress;
-                            
-                            ctx.strokeStyle = 'rgba(0, 255, 102, 0.35)';
-                            ctx.beginPath();
-                            ctx.moveTo(pPrev.x, pPrev.y);
-                            ctx.lineTo(prevX, prevY);
-                            ctx.stroke();
-                        }}
-                        
-                        if (nodeProgress === 1) {{
-                            ctx.fillStyle = '#00E5FF';
-                            ctx.shadowBlur = 8;
-                            ctx.shadowColor = '#00E5FF';
-                            ctx.fillRect(pNode.x - 3, pNode.y - 3, 6, 6);
-                            ctx.shadowBlur = 0;
-                        }} else {{
-                            ctx.fillStyle = '#00FF66';
-                            ctx.beginPath();
-                            ctx.arc(currentX, currentY, 4, 0, Math.PI * 2);
-                            ctx.fill();
-                        }}
-                    }}
+                
+                visualNodes.forEach((node) => {{
+                    ctx.strokeStyle = 'rgba(0, 229, 255, 0.4)';
+                    ctx.lineWidth = 1;
+                    ctx.beginPath(); ctx.moveTo(coreX, coreY); ctx.lineTo(node.x, node.y); ctx.stroke();
+                    ctx.fillStyle = '#00E5FF';
+                    ctx.fillRect(node.x - 4, node.y - 4, 8, 8);
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(node.x - 1, node.y - 1, 2, 2);
                 }});
-
+                
+                let isFrameA = (Math.floor(Date.now() / 250) % 2 === 0);
+                drawPixelSpider(ctx, coreX, coreY, Date.now() * 0.001, 2.5, isFrameA, '#00FF66', '#ffffff');
+                
                 ctx.fillStyle = '#00FF66';
-                ctx.shadowBlur = 10;
-                ctx.shadowColor = '#00FF66';
-                ctx.fillRect(pCore.x - 6, pCore.y - 6, 12, 12);
-                ctx.shadowBlur = 0;
-
                 ctx.font = "bold 11px 'Courier New'";
                 ctx.fillText("📡 SWARM MONITOR: [" + engineStatus + "]", 20, 25);
                 ctx.fillStyle = '#00E5FF';
@@ -372,8 +325,8 @@ def render_spider_web_path_canvas(enriched_profiles):
                     
                     mappedNodes.push({{
                         ...node,
-                        planeX: Math.cos(angle) * distance,
-                        planeY: Math.sin(angle) * distance,
+                        x: centerX + Math.cos(angle) * distance,
+                        y: centerY + Math.sin(angle) * distance,
                         angle: angle,
                         distance: distance
                     }});
@@ -383,129 +336,97 @@ def render_spider_web_path_canvas(enriched_profiles):
             let spiderProgress = 0.0;
             let currentSegment = 0;
 
-            function project3D(planeX, planeY, rotZ, tiltX) {{
-                let cosZ = Math.cos(rotZ), sinZ = Math.sin(rotZ);
-                let rx = planeX * cosZ - planeY * sinZ;
-                let ry = planeX * sinZ + planeY * cosZ;
-                let rz = 0;
-                
-                let cosX = Math.cos(tiltX), sinX = Math.sin(tiltX);
-                let tx = rx;
-                let ty = ry * cosX - rz * sinX;
-                let tz = ry * sinX + rz * cosX;
-                
-                let perspective = 500;
-                let scale = perspective / (perspective + tz);
-                return {{
-                    x: centerX + tx * scale,
-                    y: centerY + ty * scale
-                }};
+            function drawPixelSpider(context, x, y, angle, scale, isFrameA, color, eyeColor) {{
+                context.save();
+                context.translate(x, y);
+                context.rotate(angle);
+                const p = scale;
+                context.fillStyle = color;
+                context.fillRect(-5*p, -3*p, 6*p, 6*p);
+                context.fillRect(-6*p, -2*p, 8*p, 4*p);
+                context.fillRect(2*p, -2*p, 4*p, 4*p);
+                context.fillRect(1*p, -1*p, 6*p, 2*p);
+                context.fillStyle = eyeColor;
+                context.fillRect(4*p, -2*p, p, p);
+                context.fillRect(4*p, 1*p, p, p);
+                context.fillStyle = color;
+                if (isFrameA) {{
+                    context.fillRect(2*p, -5*p, p, 3*p); context.fillRect(3*p, -6*p, 2*p, p);
+                    context.fillRect(2*p, 3*p, p, 3*p);  context.fillRect(3*p, 5*p, 2*p, p);
+                    context.fillRect(0, -5*p, p, 3*p); context.fillRect(-1*p, -6*p, 2*p, p);
+                    context.fillRect(0, 3*p, p, 3*p);  context.fillRect(-1*p, 5*p, 2*p, p);
+                    context.fillRect(-2*p, -5*p, p, 3*p); context.fillRect(-4*p, -6*p, 3*p, p);
+                    context.fillRect(-2*p, 3*p, p, 3*p);  context.fillRect(-4*p, 5*p, 3*p, p);
+                    context.fillRect(-4*p, -4*p, p, 2*p); context.fillRect(-6*p, -5*p, 3*p, p);
+                    context.fillRect(-4*p, 2*p, p, 2*p);  context.fillRect(-6*p, 4*p, 3*p, p);
+                }} else {{
+                    context.fillRect(2*p, -4*p, p, 2*p); context.fillRect(3*p, -5*p, 3*p, p);
+                    context.fillRect(2*p, 2*p, p, 2*p);  context.fillRect(3*p, 4*p, 3*p, p);
+                    context.fillRect(0, -4*p, p, 2*p); context.fillRect(0, -5*p, 2*p, p);
+                    context.fillRect(0, 2*p, p, 2*p);  context.fillRect(0, 4*p, 2*p, p);
+                    context.fillRect(-2*p, -4*p, p, 2*p); context.fillRect(-3*p, -5*p, 2*p, p);
+                    context.fillRect(-2*p, 2*p, p, 2*p);  context.fillRect(-3*p, 4*p, 2*p, p);
+                    context.fillRect(-4*p, -5*p, p, 3*p); context.fillRect(-7*p, -6*p, 4*p, p);
+                    context.fillRect(-4*p, 3*p, p, 3*p);  context.fillRect(-7*p, 5*p, 4*p, p);
+                }}
+                context.restore();
             }}
 
-            function drawWebBackground(rotZ, tiltX) {{
+            function drawWebBackground() {{
                 ctx.strokeStyle = '#121e30';
-                ctx.lineWidth = 1;
+                ctx.lineWidth = 1.5;
                 
                 const spokeCount = 12;
                 for (let i = 0; i < spokeCount; i++) {{
                     let a = (i / spokeCount) * Math.PI * 2;
-                    let pStart = project3D(0, 0, rotZ, tiltX);
-                    let pEnd = project3D(Math.cos(a) * 320, Math.sin(a) * 320, rotZ, tiltX);
                     ctx.beginPath();
-                    ctx.moveTo(pStart.x, pStart.y);
-                    ctx.lineTo(pEnd.x, pEnd.y);
+                    ctx.moveTo(centerX, centerY);
+                    ctx.lineTo(centerX + Math.cos(a) * 320, centerY + Math.sin(a) * 320);
                     ctx.stroke();
                 }}
 
                 ctx.strokeStyle = '#0a1424';
                 for (let r = 40; r <= 280; r += 40) {{
-                    ctx.beginPath();
-                    for (let j = 0; j <= 8; j++) {{
-                        let a = (j / 8) * Math.PI * 2;
-                        let p = project3D(Math.cos(a) * r, Math.sin(a) * r, rotZ, tiltX);
-                        if (j === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
-                    }}
-                    ctx.closePath();
-                    ctx.stroke();
+                    ctx.strokeRect(centerX - r, centerY - r, r * 2, r * 2);
                 }}
             }}
 
             function drawSpiderEntity(x, y, angle) {{
-                ctx.save();
-                ctx.translate(x, y);
-                ctx.rotate(angle);
-                
-                ctx.fillStyle = '#00FF66';
-                ctx.beginPath();
-                ctx.arc(0, 0, 7, 0, Math.PI * 2);
-                ctx.arc(6, 0, 4, 0, Math.PI * 2);
-                ctx.fill();
-                
-                ctx.fillStyle = '#ffffff';
-                ctx.fillRect(7, -2, 2, 2);
-                ctx.fillRect(7, 1, 2, 2);
-
-                ctx.strokeStyle = '#00FF66';
-                ctx.lineWidth = 1.5;
-                let legCycle = Math.sin(Date.now() * 0.02);
-                
-                for (let i = 0; i < 4; i++) {{
-                    let offset = (i - 1.5) * 0.4;
-                    ctx.beginPath();
-                    ctx.moveTo(2, -2);
-                    ctx.quadraticCurveTo(-5 + (legCycle * 3), -12 + offset * 5, -12, -10 + offset * 8);
-                    ctx.stroke();
-                    
-                    ctx.beginPath();
-                    ctx.moveTo(2, 2);
-                    ctx.quadraticCurveTo(-5 + (legCycle * 3), 12 + offset * 5, -12, 10 + offset * 8);
-                    ctx.stroke();
-                }}
-                ctx.restore();
+                let isFrameA = (Math.floor(Date.now() / 150) % 2 === 0);
+                drawPixelSpider(ctx, x, y, angle, 2.0, isFrameA, '#00FF66', '#ffffff');
             }}
 
             function loop() {{
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
-                
-                let rotZ = Date.now() * 0.0001;
-                let tiltX = 0.8;
-                
-                drawWebBackground(rotZ, tiltX);
+                drawWebBackground();
 
                 if (mappedNodes.length === 0) return;
 
-                mappedNodes.forEach((node) => {{
-                    let p = project3D(node.planeX, node.planeY, rotZ, tiltX);
-                    node.x = p.x;
-                    node.y = p.y;
-                }});
-
                 ctx.strokeStyle = 'rgba(0, 229, 255, 0.65)';
                 ctx.lineWidth = 2;
-                ctx.shadowBlur = 4;
-                ctx.shadowColor = '#00E5FF';
                 ctx.beginPath();
                 mappedNodes.forEach((node, idx) => {{
                     if (idx === 0) ctx.moveTo(node.x, node.y);
                     else ctx.lineTo(node.x, node.y);
                 }});
                 ctx.stroke();
-                ctx.shadowBlur = 0;
 
                 mappedNodes.forEach((node) => {{
-                    ctx.beginPath();
-                    ctx.arc(node.x, node.y, 6, 0, Math.PI * 2);
+                    const nSize = 6;
                     
                     if (node.role === "START") ctx.fillStyle = '#00FF66';
                     else if (node.role === "TARGET") ctx.fillStyle = '#FF0055';
                     else ctx.fillStyle = '#00E5FF';
                     
                     if (node.isBanned) ctx.fillStyle = '#7f0000';
-                    ctx.fill();
+                    
+                    ctx.fillRect(node.x - nSize, node.y - nSize, nSize * 2, nSize * 2);
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(node.x - 2, node.y - 2, 4, 4);
 
                     ctx.strokeStyle = '#ffffff';
                     ctx.lineWidth = 1;
-                    ctx.beginPath(); ctx.arc(node.x, node.y, 10, 0, Math.PI * 2); ctx.stroke();
+                    ctx.strokeRect(node.x - 9, node.y - 9, 18, 18);
 
                     ctx.fillStyle = '#ffffff';
                     ctx.font = "bold 10px 'Courier New'";
@@ -594,7 +515,6 @@ with tab1:
         with graph_placeholder:
             render_spider_web_path_canvas(st.session_state.final_enriched_path)
         
-        # Display explicit readable path list directly on text matrix layout
         st.markdown("#### 🎯 Linked Path Connection Sequence Details")
         df_path = pd.DataFrame(st.session_state.final_enriched_path)
         st.dataframe(df_path[["id", "name", "created", "isBanned"]], use_container_width=True)
@@ -675,7 +595,7 @@ async def proxy_worker_task(worker_id, pool_manager, network_queue, cache_queue,
                 if response.status == 200:
                     data = await response.json()
                     friends = [int(f["id"]) for f in data.get("data", []) if not f.get("isDeleted", False)]
-        
+                    
                     g_cache[str_node] = friends
                     save_single_profile_to_db(str_node, friends)
                     results_container["new_discoveries"][str_node] = friends
@@ -801,7 +721,7 @@ if start_btn and s_input.isdigit() and t_input.isdigit():
     pool_mgr = ProxyPool(proxy_input)
     if pool_mgr.proxies:
         st.session_state.running = True
-        st.session_state.final_enriched_path = None # Clear old data before searching
+        st.session_state.final_enriched_path = None 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(master_pipeline_engine(int(s_input), int(t_input), pool_mgr))
@@ -818,7 +738,7 @@ with tab2:
     hbtn1, hbtn2 = st.columns(2)
     with hbtn1: start_harvest_btn = st.button("⚡ Ignite Crawler", use_container_width=True, type="primary", key="harvest_start")
     with hbtn2: stop_harvest_btn = st.button("🛑 Stop Harvester", use_container_width=True, key="harvest_stop")
-     
+         
     if stop_harvest_btn:
         st.session_state.harvester_running = False
         st.rerun()
@@ -949,7 +869,7 @@ with tab3:
                 friends = await seed_worker_pipeline(uid, pool_manager, session, shared_metrics)
                 layer2_queue.extend(friends)
                 await asyncio.sleep(0.1)
-                 
+               
             layer2_queue = list(set([uid for uid in layer2_queue if str(uid) not in g_cache]))
             random.shuffle(layer2_queue)
             for idx, l2_uid in enumerate(layer2_queue[:max_l2]):
