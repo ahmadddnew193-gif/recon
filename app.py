@@ -976,14 +976,36 @@ with st.expander("⚙️ Database Management Tools", expanded=False):
                 st.info("Database file does not exist or has already been deleted.")
         except Exception as e:
             st.error(f"Could not delete database file: {e}")
+# ===================================
 # ==========================================
-# CRAWLER PATH SANITIZATION FILTER (ADDED)
+# RUNTIME ENGINE INTERCEPTOR & CACHE SANITIZER (ADDED)
 # ==========================================
-# Automatically run cleanups on the final chain to remove and ignore invalid IDs like -1 or 0
-if st.session_state.get("final_enriched_path"):
-    sanitized_path = [profile for profile in st.session_state.final_enriched_path if int(profile.get("id", 0)) > 0]
-    if len(sanitized_path) < 2 or (len(sanitized_path) == 2 and sanitized_path[0]["id"] == sanitized_path[1]["id"]):
-        # If the path was purely kept together by a -1 collision artifact, reset it
-        st.session_state.final_enriched_path = None
-    else:
-        st.session_state.final_enriched_path = sanitized_path
+# 1. Purge -1 from the existing loaded memory cache so it stops recycling the error
+if "global_cache" in st.session_state:
+    for __k, __v in list(st.session_state.global_cache.items()):
+        if int(__k) <= 0:
+            del st.session_state.global_cache[__k]
+            continue
+        __clean = [f for f in __v if int(f) > 0]
+        if len(__clean) != len(__v):
+            st.session_state.global_cache[__k] = __clean
+
+# 2. Monkey-Patch the asyncio PriorityQueue to intercept and destroy -1 mid-flight
+import asyncio
+if not hasattr(asyncio.PriorityQueue, "_nuke_invalid_uids"):
+    _original_put_nowait = asyncio.PriorityQueue.put_nowait
+    
+    def _sanitized_put_nowait(self, item):
+        # Your engine queues items as: (score, (direction, node_id))
+        try:
+            if isinstance(item, tuple) and len(item) == 2:
+                if isinstance(item[1], tuple) and len(item[1]) == 2:
+                    __node = item[1][1]
+                    if int(__node) <= 0:
+                        return  # Silently drop the invalid UID; do not queue it!
+        except Exception:
+            pass
+        _original_put_nowait(self, item)
+        
+    asyncio.PriorityQueue.put_nowait = _sanitized_put_nowait
+    asyncio.PriorityQueue._nuke_invalid_uids = True
