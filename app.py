@@ -976,3 +976,14 @@ with st.expander("⚙️ Database Management Tools", expanded=False):
                 st.info("Database file does not exist or has already been deleted.")
         except Exception as e:
             st.error(f"Could not delete database file: {e}")
+# ==========================================
+# CRAWLER PATH SANITIZATION FILTER (ADDED)
+# ==========================================
+# Automatically run cleanups on the final chain to remove and ignore invalid IDs like -1 or 0
+if st.session_state.get("final_enriched_path"):
+    sanitized_path = [profile for profile in st.session_state.final_enriched_path if int(profile.get("id", 0)) > 0]
+    if len(sanitized_path) < 2 or (len(sanitized_path) == 2 and sanitized_path[0]["id"] == sanitized_path[1]["id"]):
+        # If the path was purely kept together by a -1 collision artifact, reset it
+        st.session_state.final_enriched_path = None
+    else:
+        st.session_state.final_enriched_path = sanitized_path
